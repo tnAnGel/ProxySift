@@ -1,2 +1,80 @@
 # ProxySift
-Fast, automated multi-protocol proxy &amp; VPN checker. Test HTTP(S), SOCKS4/5, VLESS, VMess, Trojan and Hysteria nodes. Publish verified lists automatically.
+
+ProxySift — настольное приложение для проверки VPN-узлов и HTTP/HTTPS/SOCKS-прокси. Интерфейс собран на Slint, проверяющая логика и CLI — на Rust.
+
+## Запуск приложения
+
+Для разработки запустите GUI из корня проекта:
+
+```sh
+cargo run --bin proxy-sift
+```
+
+На macOS соберите и откройте приложение:
+
+```sh
+./script/build_and_run.sh
+```
+
+Готовый пакет создаётся в `dist/ProxySift.app`. Скрипт принимает `--verify`, чтобы после сборки открыть приложение и проверить, что процесс запустился.
+
+Для передачи приложения соберите версионный ZIP-архив:
+
+```sh
+./script/package_macos.sh
+```
+
+Скрипт создаёт `dist/ProxySift-<версия>-macos-<архитектура>.zip` и файл с SHA-256. При необходимости приложение можно подписать, задав `CODESIGN_IDENTITY`. Для подписи Developer ID и нотариализации передайте `NOTARIZE=true`, `APPLE_ID`, `APPLE_TEAM_ID` и `APPLE_APP_SPECIFIC_PASSWORD` через переменные окружения; значения не записываются в файлы проекта.
+
+## Режимы проверки
+
+- **VPN** использует перенесённый Rust-пайплайн `proxy-rs`: загрузка источников, разбор и дедупликация, GeoIP, TCP-проверка и, если включено, измерение скорости через Xray.
+- **HTTP/SOCKS** проверяет HTTP, HTTPS, SOCKS4, SOCKS4a и SOCKS5 протокольным запросом через прокси. Открытый TCP-порт сам по себе не считается успешной проверкой.
+- Подписки и вставленные вручную узлы хранятся в настройках отдельно. Для VPN доступны три встроенных набора источников; выбранный набор и правки его ссылок сохраняются независимо.
+- Находки хранятся в одном локальном SQLite-файле, но архивы прокси и VPN — отдельные непересекающиеся списки: страница прокси показывает HTTP/HTTPS и SOCKS, страница VPN — VLESS, VMess, Trojan, Shadowsocks, Hysteria и другие VPN-протоколы.
+
+Подробнее о наборах 1–3, их хранении и выборе см. [документацию по наборам источников](docs/source-sets.md).
+Значения лимита, порога скорости и переключателей «Скорость»/«GeoIP» описаны в [руководстве по параметрам проверки](docs/check-settings.md).
+
+## Файлы и данные
+
+На macOS пользовательские данные по умолчанию находятся в:
+
+```text
+~/Library/Application Support/org.ProxySift.ProxySift/
+```
+
+Для изолированного запуска или отдельного профиля можно задать абсолютный путь через `PROXYSIFT_DATA_DIR`. Если переменная не задана, используется стандартная папка выше.
+
+В этой папке приложение хранит настройки и источники, историю запусков, SQLite-архив, результаты и локальные компоненты. Основные файлы:
+
+```text
+proxy-history.sqlite3       # общая база находок и наблюдений
+run-history.json            # совместимая копия истории; SQLite — основной источник
+settings.json               # режим, источники и параметры проверки
+results/                    # текстовые результаты, JSON и CSV
+xray                        # Xray Core, если установлен
+GeoLite2-Country.mmdb       # GeoIP, если установлен
+```
+
+GeoIP обновляется по ревизии файла в ветке `download` репозитория [P3TERX/GeoLite.mmdb](https://github.com/P3TERX/GeoLite.mmdb/tree/download). Приложение показывает дату и ревизию источника; базу можно установить или обновить на странице «Ядра и GeoIP».
+
+## Командная строка
+
+CLI оставлен отдельным и продолжает использовать тот же VPN-бэкенд:
+
+```sh
+cargo run --bin proxy-rs -- --help
+```
+
+Сборка workspace в release-режиме создаёт `target/release/proxy-sift` и `target/release/proxy-rs`:
+
+```sh
+cargo build --workspace --release
+```
+
+Для отдельной сборки CLI используйте ту же команду `cargo build --workspace --release`. Она создаёт `proxy-rs` (на Windows — `proxy-rs.exe`) рядом с GUI-бинарником.
+
+## Платформы
+
+GUI и CLI используют общий Rust workspace. `script/build_and_run.sh` упаковывает GUI в macOS `.app`; отдельные установочные пакеты Windows/Linux в этом репозитории пока не настроены. Android метаданные и сборка APK сохранены в Cargo-конфигурации; для неё нужны Android SDK/NDK, Rust Android targets и `cargo-apk`.

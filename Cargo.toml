@@ -1,0 +1,67 @@
+[package]
+name = "proxy-sift"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+build = "build.rs"
+default-run = "proxy-sift"
+
+[package.metadata.android]
+package = "dev.proxysift.app"
+label = "ProxySift"
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "proxy-rs"
+path = "src/bin/proxy-rs.rs"
+
+[workspace]
+members = ["proxy-clash", "proxy-singbox"]
+resolver = "2"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+futures = "0.3"
+indicatif = "0.17"
+maxminddb = "0.32"
+percent-encoding = "2"
+proxy-clash = { path = "proxy-clash" }
+proxy-singbox = { path = "proxy-singbox" }
+rand = "0.8"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["socks", "rustls-tls", "gzip", "brotli", "http2", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+url = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+directories = "6"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
+
+[build-dependencies]
+slint-build = "1.18.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+[dev-dependencies]
+i-slint-backend-testing = "=1.18.1"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

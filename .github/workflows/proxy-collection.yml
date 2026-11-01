@@ -1,0 +1,91 @@
+name: proxy-collection
+
+on:
+  schedule:
+    # Ежечасная генерация конфигурации.
+    - cron: "0 */1 * * *"
+  workflow_dispatch:
+    inputs:
+      set:
+        description: "Набор источников из sources.json"
+        default: "all"
+      limit:
+        description: "Лимит прокси до проверок"
+        default: "25000"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clash-gen
+  # Не прерываем активную проверку, если следующий запуск уже подошёл по расписанию.
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SET: ${{ github.event.inputs.set || 'all' }}
+      LIMIT: ${{ github.event.inputs.limit || '25000' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set cache date
+        id: cache-date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache xray + geoip
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/release/xray
+            target/release/geoip.dat
+          key: ${{ runner.os }}-core-${{ steps.cache-date.outputs.date }}
+          restore-keys: |
+            ${{ runner.os }}-core-
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Generate config
+        run: |
+          mkdir -p out
+          ./target/release/proxy-rs \
+            --set "$SET" \
+            --shuffle \
+            --limit "$LIMIT" \
+            --min-kb 500 \
+            --clash out/clash.yaml \
+            --output out/alive.txt \
+            --good-output out/good.txt \
+            --dead out/dead.txt
+
+      - name: Publish to dist branch
+        working-directory: out
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b dist
+          git add -A
+          git commit -q -m "config: update $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # dist — сгенерированная ветка: держим один свежий коммит, без истории
+          git push -f origin dist
+
+      - name: Upload artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: clash-output
+          path: out/
+          retention-days: 7

@@ -1,0 +1,1497 @@
+import { ScrollView } from "std-widgets.slint";
+import { StatusPulse } from "status-pulse.slint";
+
+export struct RunHistoryRow {
+    title: string,
+    time: string,
+    outcome: string,
+    summary: string,
+    elapsed: string,
+}
+
+export struct DatabaseRow {
+    id: string,
+    protocol: string,
+    address: string,
+    name: string,
+    country: string,
+    status: string,
+    ping: string,
+    speed: string,
+    first-seen: string,
+    last-seen: string,
+    checks: string,
+}
+
+export struct ArchiveObservationRow {
+    run: string,
+    time: string,
+    status: string,
+    country: string,
+    ping: string,
+    speed: string,
+    summary: string,
+}
+
+component PageTitle inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    height: 54px;
+    background: transparent;
+    VerticalLayout {
+        spacing: 2px;
+        Text { text: root.title; color: #172336; font-size: 28px; font-weight: 700; height: 32px; }
+        Text { text: root.subtitle; color: #637187; font-size: 13px; height: 18px; }
+    }
+}
+
+component PrimaryAction inherits Rectangle {
+    in property <string> label;
+    in property <length> button-width: 150px;
+    callback clicked;
+    width: button-width;
+    height: 38px;
+    border-radius: 6px;
+    background: action-area.pressed ? #0e4f87 : action-area.has-hover ? #1269ad : #155da2;
+    Text { text: root.label; color: #ffffff; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+    action-area := TouchArea { clicked => root.clicked(); }
+}
+
+component SecondaryAction inherits Rectangle {
+    in property <string> label;
+    in property <length> button-width: 150px;
+    in property <bool> disabled: false;
+    callback clicked;
+    width: button-width;
+    height: 36px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.disabled ? #e5e9ef : action-area.has-hover ? #b8cde1 : #dce3eb;
+    background: root.disabled ? #f6f8fa : action-area.pressed ? #e8f1f8 : action-area.has-hover ? #f5f9fc : #ffffff;
+    Text { text: root.label; color: root.disabled ? #8a96a7 : #155da2; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+    action-area := TouchArea { enabled: !root.disabled; clicked => root.clicked(); }
+}
+
+component IconSecondaryAction inherits Rectangle {
+    in property <string> label;
+    in property <length> button-width: 150px;
+    in property <image> icon;
+    in property <bool> primary: false;
+    in property <bool> accent: false;
+    callback clicked;
+    width: button-width;
+    height: 34px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.primary ? (action-area.pressed ? #0e4f87 : #155da2) : (action-area.has-hover ? #b8cde1 : #dce3eb);
+    background: root.primary ? (action-area.pressed ? #0e4f87 : action-area.has-hover ? #1269ad : #155da2) : (action-area.pressed ? #e8f1f8 : action-area.has-hover ? #f5f9fc : #ffffff);
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        alignment: center;
+        HorizontalLayout {
+            height: 18px;
+            alignment: center;
+            spacing: 7px;
+            Image { source: root.icon; width: 16px; height: 16px; }
+            Text { text: root.label; color: root.primary ? #ffffff : root.accent ? #155da2 : #52647a; font-size: 12px; font-weight: 600; height: 18px; vertical-alignment: center; }
+        }
+    }
+    action-area := TouchArea { clicked => root.clicked(); }
+}
+
+component OverviewMetric inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <color> accent;
+    height: 82px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #e2e7ee;
+    background: #ffffff;
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: 3px; background: root.accent; }
+    VerticalLayout {
+        alignment: center;
+        padding-left: 18px;
+        spacing: 4px;
+        Text { text: root.label; color: #6b7789; font-size: 11px; font-weight: 600; height: 16px; }
+        Text { text: root.value; color: #172336; font-size: 23px; font-weight: 700; height: 28px; }
+    }
+}
+
+component RecentRunRow inherits Rectangle {
+    in property <RunHistoryRow> entry;
+    height: 52px;
+    background: transparent;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: root.entry.outcome == "Ошибка" ? #c2413a : root.entry.outcome == "Отменена" ? #a96608 : #0a8a4a;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.entry.title; color: #263448; font-size: 12px; font-weight: 600; height: 16px; }
+            Text { text: root.entry.summary; color: #77859a; font-size: 10px; height: 14px; overflow: elide; }
+        }
+        Rectangle { }
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.entry.time; color: #77859a; font-size: 10px; height: 16px; horizontal-alignment: right; }
+        }
+    }
+    Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #eef1f5; }
+}
+
+component ResourceStatusCard inherits Rectangle {
+    in property <string> title;
+    in property <string> state;
+    in property <string> description;
+    in property <string> detail;
+    in property <string> path;
+    in property <string> action-label;
+    in property <bool> busy: false;
+    in property <image> icon;
+    callback action;
+    height: 204px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #e2e7ee;
+    background: #ffffff;
+    VerticalLayout {
+        padding: 18px;
+        spacing: 9px;
+        HorizontalLayout {
+            height: 24px;
+            spacing: 9px;
+            Image { source: root.icon; width: 20px; height: 20px; }
+            Text { text: root.title; color: #243247; font-size: 15px; font-weight: 650; height: 22px; vertical-alignment: center; }
+            Rectangle { }
+            Rectangle {
+                width: 104px;
+                height: 24px;
+                border-radius: 12px;
+                background: root.state == "Готово" || root.state == "Найдено" || root.state == "Актуально" ? #e7f5ed : #fff3e6;
+                Text { text: root.state; color: root.state == "Готово" || root.state == "Найдено" || root.state == "Актуально" ? #137342 : #a65b0b; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+        Text { text: root.description; color: #6d7a8e; font-size: 11px; height: 32px; wrap: word-wrap; }
+        Text { text: root.detail; color: #52647a; font-size: 10px; height: 15px; overflow: elide; }
+        Rectangle { }
+        Text { text: root.path; color: #8a96a7; font-size: 10px; height: 16px; overflow: elide; }
+        HorizontalLayout {
+            height: 34px;
+            Rectangle { }
+            resource-action := SecondaryAction { label: root.busy ? "Выполняется…" : root.action-label; button-width: 150px; disabled: root.busy; clicked => root.action(); }
+        }
+    }
+}
+
+export component OverviewScreen inherits Rectangle {
+    in property <string> checker-mode: "vpn";
+    in property <string> count-fetched;
+    in property <string> count-alive;
+    in property <string> count-good;
+    in property <string> count-speed;
+    in property <string> status;
+    in property <string> status-detail;
+    in property <string> source-count-label;
+    in property <string> core-status;
+    in property <string> geoip-status;
+    in property <[RunHistoryRow]> run-history: [];
+    callback start-check;
+    callback navigate(string);
+    horizontal-stretch: 1;
+    height: 100%;
+    background: #f5f7f9;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            padding-top: 24px;
+            padding-left: 22px;
+            padding-right: 19px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            HorizontalLayout {
+                height: 54px;
+                PageTitle { title: "Обзор"; subtitle: "Состояние проверок и рабочей среды"; }
+                Rectangle { }
+                VerticalLayout { height: 100%; alignment: center;
+                    overview-new-check := PrimaryAction { label: "Новая проверка"; button-width: 150px; clicked => root.start-check(); }
+                }
+            }
+            Rectangle {
+                height: 78px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #dce4ed;
+                background: #ffffff;
+                HorizontalLayout {
+                    height: 100%;
+                    padding-left: 12px;
+                    padding-right: 18px;
+                    spacing: 0px;
+                    VerticalLayout { width: 30px; height: 100%; alignment: center;
+                        StatusPulse {
+                            accent: root.status == "Проверка завершилась с ошибкой" ? #c2413a : #0a8a4a;
+                            pulsing: root.status == "Готов к запуску";
+                        }
+                    }
+                    VerticalLayout { alignment: center; spacing: 3px;
+                        Text { text: root.status; color: root.status == "Проверка завершилась с ошибкой" ? #b53d36 : #087847; font-size: 14px; font-weight: 700; height: 18px; }
+                        Text { text: root.status-detail; color: #738197; font-size: 11px; height: 16px; overflow: elide; }
+                    }
+                    Rectangle { }
+                    VerticalLayout { height: 100%; alignment: center;
+                        overview-status-history := SecondaryAction { label: "История запусков"; button-width: 142px; clicked => root.navigate("history"); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                height: 82px;
+                spacing: 11px;
+                OverviewMetric { horizontal-stretch: 1; label: "ПРОВЕРЕНО"; value: root.count-fetched; accent: #1269c4; }
+                OverviewMetric { horizontal-stretch: 1; label: "ЖИВЫЕ"; value: root.count-alive; accent: #0f8a4b; }
+                OverviewMetric { horizontal-stretch: 1; label: "ВЫШЕ ПОРОГА"; value: root.count-good; accent: #078a98; }
+                OverviewMetric { horizontal-stretch: 1; label: root.checker-mode == "forward" ? "МЕДИАННЫЙ PING" : "МЕДИАННАЯ СКОРОСТЬ"; value: root.count-speed; accent: #7a52e8; }
+            }
+            HorizontalLayout {
+                height: 248px;
+                spacing: 14px;
+                Rectangle {
+                    horizontal-stretch: 57;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #e2e7ee;
+                    background: #ffffff;
+                    VerticalLayout {
+                        spacing: 0px;
+                        HorizontalLayout {
+                            height: 50px;
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            Text { text: "Последние запуски"; color: #243247; font-size: 15px; font-weight: 650; vertical-alignment: center; }
+                            Rectangle { }
+                            VerticalLayout { height: 100%; alignment: center;
+                                overview-all-history := SecondaryAction { label: "Вся история"; button-width: 112px; clicked => root.navigate("history"); }
+                            }
+                        }
+                        Rectangle { height: 1px; background: #edf0f4; }
+                        if root.run-history.length == 0: VerticalLayout {
+                            alignment: center;
+                            Rectangle { }
+                            Text { text: "Проверок пока не было"; color: #405066; font-size: 13px; font-weight: 600; horizontal-alignment: center; }
+                            Text { text: "Первый запуск появится здесь"; color: #7a8798; font-size: 11px; horizontal-alignment: center; }
+                            Rectangle { }
+                        }
+                        if root.run-history.length > 0: RecentRunRow { entry: root.run-history[0]; }
+                        if root.run-history.length > 1: RecentRunRow { entry: root.run-history[1]; }
+                        if root.run-history.length > 2: RecentRunRow { entry: root.run-history[2]; }
+                        Rectangle { }
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 42;
+                    spacing: 14px;
+                    Rectangle {
+                        height: 116px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #e2e7ee;
+                        background: #ffffff;
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 5px;
+                            HorizontalLayout { height: 22px; spacing: 8px;
+                                Image { source: @image-url("icons/nav-sources.svg"); width: 18px; height: 18px; }
+                                Text { text: "Источники"; color: #243247; font-size: 14px; font-weight: 650; height: 20px; vertical-alignment: center; }
+                                Rectangle { }
+                                Text { text: root.source-count-label; color: #64748a; font-size: 10px; height: 18px; vertical-alignment: center; }
+                            }
+                            Text { text: "Каталог ProxySift и ваши подписки"; color: #718096; font-size: 11px; height: 16px; }
+                            overview-manage-sources := SecondaryAction { label: "Управлять источниками"; button-width: 172px; height: 30px; clicked => root.navigate("sources"); }
+                        }
+                    }
+                    Rectangle {
+                        height: 118px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #e2e7ee;
+                        background: #ffffff;
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 5px;
+                            HorizontalLayout { height: 22px; spacing: 8px;
+                                Image { source: @image-url("icons/nav-network.svg"); width: 18px; height: 18px; }
+                                Text { text: "Среда проверки"; color: #243247; font-size: 14px; font-weight: 650; height: 20px; vertical-alignment: center; }
+                            }
+                            Text { text: "Xray: " + root.core-status + "   ·   GeoIP: " + root.geoip-status; color: #718096; font-size: 11px; height: 16px; }
+                            overview-open-runtime := SecondaryAction { label: "Ядра и GeoIP"; button-width: 128px; height: 30px; clicked => root.navigate("runtime"); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component SourcesScreen inherits Rectangle {
+    in property <string> checker-mode: "vpn";
+    in property <string> source-set: "3";
+    in property <string> source-count-label;
+    in property <string> catalog-edit-error;
+    in property <[string]> catalog-entries: [];
+    in property <string> subscription-summary;
+    in property <[string]> subscription-lines: [];
+    in property <bool> use-default-sources;
+    in property <bool> has-manual-links;
+    callback edit-subscriptions;
+    callback add-source;
+    callback remove-source(int);
+    callback toggle-sources;
+    callback start-check;
+    horizontal-stretch: 1;
+    height: 100%;
+    background: #f5f7f9;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            padding-top: 24px;
+            padding-left: 22px;
+            padding-right: 19px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            HorizontalLayout {
+                height: 54px;
+                PageTitle { title: "Источники"; subtitle: "Каталог ProxySift, подписки и добавленные вручную прокси"; }
+                Rectangle { }
+                VerticalLayout { height: 100%; alignment: center;
+                    sources-start-check := PrimaryAction { label: "Начать проверку"; button-width: 164px; clicked => root.start-check(); }
+                }
+            }
+            HorizontalLayout {
+                height: 82px;
+                spacing: 11px;
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #e2e7ee;
+                    background: #ffffff;
+                    VerticalLayout { alignment: center; padding-left: 18px; spacing: 4px;
+                        Text { text: "ВСТРОЕННЫЙ КАТАЛОГ"; color: #6b7789; font-size: 10px; font-weight: 600; height: 15px; }
+                        Text { text: root.source-count-label; color: #172336; font-size: 16px; font-weight: 650; height: 26px; }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #e2e7ee;
+                    background: #ffffff;
+                    VerticalLayout { alignment: center; padding-left: 18px; spacing: 4px;
+                        Text { text: "ПОДПИСКИ"; color: #6b7789; font-size: 10px; font-weight: 600; height: 15px; }
+                        Text { text: root.subscription-summary; color: #172336; font-size: 16px; font-weight: 650; height: 26px; }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #e2e7ee;
+                    background: #ffffff;
+                    VerticalLayout { alignment: center; padding-left: 18px; spacing: 4px;
+                        Text { text: "ПРОКСИ ВРУЧНУЮ"; color: #6b7789; font-size: 10px; font-weight: 600; height: 15px; }
+                        Text { text: root.has-manual-links ? "Добавлены" : "Не добавлены"; color: #172336; font-size: 16px; font-weight: 650; height: 26px; }
+                    }
+                }
+            }
+            HorizontalLayout {
+                height: 425px;
+                spacing: 14px;
+                Rectangle {
+                    horizontal-stretch: 57;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #e2e7ee;
+                    background: #ffffff;
+                    VerticalLayout {
+                        spacing: 0px;
+                        HorizontalLayout {
+                            height: 58px;
+                            padding-left: 18px;
+                            padding-right: 18px;
+                            spacing: 9px;
+                            VerticalLayout { height: 100%; alignment: center;
+                                Image { source: @image-url("icons/nav-sources.svg"); width: 20px; height: 20px; }
+                            }
+                            VerticalLayout { height: 100%; alignment: center; spacing: 2px;
+                                Text { text: "Каталог ProxySift"; color: #243247; font-size: 15px; font-weight: 650; height: 19px; vertical-alignment: center; }
+                                Text { text: "Набор " + root.source-set + " · проверенные адреса источников"; color: #718096; font-size: 10px; height: 14px; vertical-alignment: center; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            VerticalLayout { height: 100%; alignment: center;
+                                sources-add-source := IconSecondaryAction { label: "Добавить источник"; button-width: 160px; primary: true; icon: @image-url("icons/source-add.svg"); clicked => root.add-source(); }
+                            }
+                            VerticalLayout { height: 100%; alignment: center;
+                                sources-toggle-catalog := IconSecondaryAction {
+                                    label: root.use-default-sources ? "Отключить" : "Подключить";
+                                    button-width: 124px;
+                                    icon: root.use-default-sources ? @image-url("icons/toggle-on.svg") : @image-url("icons/toggle-off.svg");
+                                    clicked => root.toggle-sources();
+                                }
+                            }
+                        }
+                        Rectangle { height: 1px; background: #edf0f4; }
+                        ScrollView {
+                            height: 320px;
+                            VerticalLayout {
+                                padding: 7px;
+                                spacing: 1px;
+                                for url[index] in root.catalog-entries: Rectangle {
+                                    height: 31px;
+                                    border-radius: 4px;
+                                    background: remove-entry-area.has-hover ? #f2f7fb : transparent;
+                                    HorizontalLayout { height: 100%; padding-left: 9px; padding-right: 7px; spacing: 8px;
+                                        Text { text: (index + 1) + "."; color: #8a96a7; font-size: 10px; width: 24px; vertical-alignment: center; }
+                                        Text { text: url; color: #344257; font-size: 10px; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+                                        VerticalLayout {
+                                            width: 26px;
+                                            height: 100%;
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 26px;
+                                                height: 25px;
+                                                border-radius: 4px;
+                                                background: remove-entry-area.pressed ? #fdebea : remove-entry-area.has-hover ? #fff2f1 : transparent;
+                                                Text { text: "×"; color: #8b5b5a; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                                                remove-entry-area := TouchArea { clicked => root.remove-source(index); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { height: 1px; background: #edf0f4; }
+                        HorizontalLayout { height: 42px; padding-left: 16px; padding-right: 16px;
+                            Text { text: root.catalog-edit-error != "" ? root.catalog-edit-error : root.checker-mode == "forward" ? "Встроенный каталог используется только в VPN-режиме." : "Каталог включается в каждый запуск, когда переключатель активен."; color: root.catalog-edit-error == "" ? #7a8798 : #b53d36; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 42;
+                    spacing: 14px;
+                    Rectangle {
+                        height: 255px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #e2e7ee;
+                        background: #ffffff;
+                        VerticalLayout {
+                            spacing: 0px;
+                            HorizontalLayout { height: 58px; padding-left: 18px; padding-right: 18px; spacing: 9px;
+                                VerticalLayout { height: 100%; alignment: center;
+                                    Image { source: @image-url("icons/nav-link.svg"); width: 19px; height: 19px; }
+                                }
+                                VerticalLayout { height: 100%; alignment: center;
+                                    Text { text: "Ваши подписки"; color: #243247; font-size: 15px; font-weight: 650; height: 22px; vertical-alignment: center; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                VerticalLayout { height: 100%; alignment: center;
+                                    Text { text: root.subscription-summary; color: #718096; font-size: 10px; height: 18px; vertical-alignment: center; }
+                                }
+                            }
+                            Rectangle { height: 1px; background: #edf0f4; }
+                            if root.subscription-lines.length == 0: VerticalLayout {
+                                height: 145px;
+                                alignment: center;
+                                spacing: 5px;
+                                HorizontalLayout { width: 100%; alignment: center;
+                                    Image { source: @image-url("icons/nav-link.svg"); width: 22px; height: 22px; colorize: #9aacc0; }
+                                }
+                                Text { width: 100%; text: "Подписок пока нет"; color: #405066; font-size: 13px; font-weight: 600; horizontal-alignment: center; }
+                                Text { width: 100%; text: "Добавьте URL, и ProxySift загрузит его при проверке."; color: #7a8798; font-size: 10px; horizontal-alignment: center; }
+                            }
+                            if root.subscription-lines.length > 0: ScrollView {
+                                height: 145px;
+                                VerticalLayout {
+                                    for url in root.subscription-lines: Rectangle {
+                                        height: 34px;
+                                        HorizontalLayout { height: 100%; padding-left: 16px; padding-right: 12px;
+                                            Text { text: url; color: #516177; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle { height: 1px; background: #edf0f4; }
+                            HorizontalLayout { height: 50px; padding-left: 16px; padding-right: 16px; spacing: 12px;
+                                VerticalLayout { height: 100%; alignment: center;
+                                    sources-edit-subscriptions := IconSecondaryAction { label: "Добавить URL"; button-width: 124px; height: 30px; icon: @image-url("icons/link-add.svg"); clicked => root.edit-subscriptions(); }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                VerticalLayout { height: 100%; alignment: center;
+                                    Text { text: "URL загружаются при запуске"; color: #8490a1; font-size: 9px; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        height: 156px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #e2e7ee;
+                        background: #ffffff;
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 7px;
+                            HorizontalLayout { height: 22px; spacing: 8px;
+                                Text { text: "Импорт прокси"; color: #243247; font-size: 14px; font-weight: 650; vertical-alignment: center; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text { text: root.has-manual-links ? "Добавлены" : "Ручной ввод"; color: #718096; font-size: 9px; vertical-alignment: center; }
+                            }
+                            Text { text: root.checker-mode == "forward" ? (root.has-manual-links ? "IP:PORT автоматически проверим как HTTP(S), SOCKS4/4a и SOCKS5/5h." : "Вставьте IP:PORT или ссылки HTTP(S), SOCKS4/4a, SOCKS5/5h.") : (root.has-manual-links ? "Добавленные VLESS, VMess, Trojan и другие прокси попадут в следующий запуск." : "Вставьте готовые VLESS, VMess, Trojan и другие прокси."); color: #718096; font-size: 10px; height: 30px; wrap: word-wrap; }
+                            Rectangle { vertical-stretch: 1; }
+                            VerticalLayout { height: 36px; alignment: center;
+                                sources-edit-proxy-links := IconSecondaryAction { label: root.has-manual-links ? "Изменить прокси" : "Вставить прокси"; button-width: 148px; height: 30px; icon: @image-url("icons/paste.svg"); accent: true; clicked => root.edit-subscriptions(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component HistoryScreen inherits Rectangle {
+    in property <[RunHistoryRow]> run-history: [];
+    callback start-check;
+    horizontal-stretch: 1;
+    height: 100%;
+    background: #f5f7f9;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            padding-top: 24px;
+            padding-left: 22px;
+            padding-right: 19px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            HorizontalLayout {
+                height: 54px;
+                PageTitle { title: "История запусков"; subtitle: "Завершённые, отменённые и неудачные проверки"; }
+                Rectangle { }
+                VerticalLayout { height: 100%; alignment: center;
+                    history-new-check := PrimaryAction { label: "Новая проверка"; button-width: 150px; clicked => root.start-check(); }
+                }
+            }
+            Rectangle {
+                height: 68px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #e2e7ee;
+                background: #ffffff;
+                HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 12px;
+                    Rectangle {
+                        width: 42px;
+                        height: 42px;
+                        border-radius: 9px;
+                        background: #edf5fc;
+                        Text {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            text: "" + root.run-history.length;
+                            color: #0069b5;
+                            font-size: 18px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    VerticalLayout {
+                                        width: 34px;
+                        height: 100%;
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: "Сохранено запусков"; color: #344257; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+                        Text { text: "Последние проверки"; color: #8491a3; font-size: 10px; vertical-alignment: center; }
+                    }
+                    Rectangle { }
+                    VerticalLayout {
+                        height: 100%;
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: "ЛИМИТ ИСТОРИИ"; color: #9aa4b2; font-size: 8px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: "50 последних запусков"; color: #718096; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
+                    }
+                }
+            }
+            Rectangle {
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #e2e7ee;
+                background: #ffffff;
+                clip: true;
+                VerticalLayout {
+                    spacing: 0px;
+                    Rectangle {
+                        height: 46px;
+                        background: #fafbfc;
+                        HorizontalLayout { padding-left: 18px; padding-right: 18px;
+                            Text { text: "ЗАПУСК"; color: #718096; font-size: 10px; font-weight: 600; width: 150px; vertical-alignment: center; }
+                            Text { text: "РЕЗУЛЬТАТ"; color: #718096; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                            Rectangle { }
+                            Text { text: "ВРЕМЯ"; color: #718096; font-size: 10px; font-weight: 600; width: 80px; horizontal-alignment: right; vertical-alignment: center; }
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: #e6eaef; }
+                    }
+                    if root.run-history.length == 0: VerticalLayout {
+                        height: 310px;
+                        alignment: center;
+                        spacing: 8px;
+                        Text { text: "Здесь появится история проверок"; color: #344257; font-size: 15px; font-weight: 650; horizontal-alignment: center; }
+                        Text { text: "Каждый запуск сохранит статус, число найденных прокси и длительность."; color: #7a8798; font-size: 11px; horizontal-alignment: center; }
+                        HorizontalLayout {
+                            width: 100%;
+                            alignment: center;
+                            history-first-check := PrimaryAction { label: "Запустить первую проверку"; button-width: 204px; clicked => root.start-check(); }
+                        }
+                    }
+                    for entry in root.run-history: Rectangle {
+                        height: 66px;
+                        background: #ffffff;
+                        HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 12px;
+                            VerticalLayout { width: 150px; alignment: center; spacing: 3px;
+                                Text { text: entry.title; color: #263448; font-size: 12px; font-weight: 600; height: 17px; }
+                                Text { text: entry.time; color: #8490a1; font-size: 10px; height: 14px; }
+                            }
+                            VerticalLayout { alignment: center; spacing: 3px;
+                                Text { text: entry.outcome; color: entry.outcome == "Ошибка" ? #b53d36 : entry.outcome == "Отменена" ? #a96608 : #137342; font-size: 11px; font-weight: 600; height: 15px; }
+                                Text { text: entry.summary; color: #718096; font-size: 10px; height: 14px; overflow: elide; }
+                            }
+                            Rectangle { }
+                            Text { text: entry.elapsed; color: #516177; font-size: 11px; width: 80px; horizontal-alignment: right; vertical-alignment: center; }
+                        }
+                        Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #eef1f5; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component ArchiveStat inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> note: "";
+    horizontal-stretch: 1;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #e5eaf0;
+    background: #fbfcfd;
+    VerticalLayout {
+        padding: 9px;
+        spacing: 2px;
+        Text { text: root.label; color: #8390a1; font-size: 8px; font-weight: 650; height: 12px; overflow: elide; }
+        Text { text: root.value; color: #263448; font-size: 12px; font-weight: 650; height: 18px; overflow: elide; }
+        Text { text: root.note; color: #8390a1; font-size: 8px; height: 11px; overflow: elide; }
+    }
+}
+
+component ArchiveDetailDialog inherits Rectangle {
+    in property <bool> opened: false;
+    in property <bool> busy: false;
+    in property <string> address;
+    in property <string> protocol;
+    in property <string> name;
+    in property <string> country;
+    in property <string> status;
+    in property <string> ping;
+    in property <string> speed;
+    in property <string> first-seen;
+    in property <string> last-seen;
+    in property <string> checks;
+    in property <string> available;
+    in property <string> success-rate;
+    in property <string> average-ping;
+    in property <string> best-speed;
+    in property <[ArchiveObservationRow]> observations: [];
+    callback close;
+    callback recheck;
+    visible: root.opened;
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #18263b80;
+        TouchArea { clicked => root.close(); }
+    }
+    Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: root.width > 820px ? 780px : root.width - 40px;
+        height: root.height > 680px ? (root.observations.length <= 2 ? 460px : root.observations.length <= 5 ? 560px : 620px) : root.height - 32px;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: #dce3eb;
+        background: #ffffff;
+        VerticalLayout {
+            padding: 20px;
+            spacing: 0px;
+            HorizontalLayout {
+                height: 30px;
+                spacing: 10px;
+                Image { source: @image-url("icons/nav-db-vpn.svg"); width: 20px; height: 20px; }
+                Text { text: "Статистика узла"; color: #172336; font-size: 18px; font-weight: 700; height: 28px; vertical-alignment: center; }
+                Rectangle { }
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 5px;
+                    background: close-area.pressed ? #e8eef5 : close-area.has-hover ? #f2f6fa : transparent;
+                    Text { text: "×"; color: #657389; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                    close-area := TouchArea { clicked => root.close(); }
+                }
+            }
+            Rectangle { height: 10px; }
+            Rectangle {
+                height: 54px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #e4eaf1;
+                background: #f7f9fc;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: root.address; color: #263448; font-size: 16px; font-weight: 700; height: 21px; overflow: elide; }
+                        Text { text: root.protocol + (root.name == "" ? "" : " · Метка: " + root.name); color: #718096; font-size: 10px; height: 15px; overflow: elide; }
+                    }
+                    Rectangle {
+                        width: 104px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: root.status == "Доступен" ? #e4f6ed : root.status == "Не прошёл" ? #fff0ee : #fff5e8;
+                        Text {
+                            text: root.status;
+                            color: root.status == "Доступен" ? #087847 : root.status == "Не прошёл" ? #b53d36 : #a96608;
+                            font-size: 10px;
+                            font-weight: 650;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+            Rectangle { height: 10px; }
+            HorizontalLayout {
+                height: 74px;
+                spacing: 8px;
+                ArchiveStat { label: "ГЕОЛОКАЦИЯ"; value: root.country; note: "определена по IP"; }
+                ArchiveStat { label: "УСПЕШНОСТЬ"; value: root.success-rate; note: "успешных: " + root.available + " / " + root.checks; }
+                ArchiveStat { label: "ПРОВЕРОК"; value: root.checks; note: "сохранено в архиве"; }
+                ArchiveStat { label: "СРЕДНИЙ PING"; value: root.average-ping; note: "по успешным проверкам"; }
+                ArchiveStat { label: "ЛУЧШАЯ СКОРОСТЬ"; value: root.best-speed; note: "за всё время"; }
+            }
+            Rectangle { height: 8px; }
+            HorizontalLayout {
+                height: 28px;
+                Text { text: "Первая проверка: " + root.first-seen; color: #718096; font-size: 9px; vertical-alignment: center; overflow: elide; }
+                Text { text: "Последняя: " + root.last-seen; color: #718096; font-size: 9px; vertical-alignment: center; overflow: elide; }
+                Rectangle { }
+                Text { text: "Последний результат  ·  Ping " + root.ping + "  ·  скорость " + root.speed; color: #52647a; font-size: 9px; vertical-alignment: center; overflow: elide; }
+            }
+            Rectangle { height: 6px; }
+            Rectangle { height: 1px; background: #e8edf2; }
+            HorizontalLayout {
+                height: 38px;
+                Text { text: "Последние проверки"; color: #263448; font-size: 14px; font-weight: 650; vertical-alignment: center; }
+                Rectangle { width: 1px; height: 14px; background: #dce3eb; }
+                Text { text: "Всего: " + root.checks; color: #8390a1; font-size: 10px; vertical-alignment: center; }
+                Rectangle { }
+                SecondaryAction { label: root.busy ? "Проверяем…" : "Проверить снова"; button-width: 132px; height: 30px; disabled: root.busy; clicked => root.recheck(); }
+            }
+            Rectangle {
+                height: 28px;
+                background: #f7f9fb;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    Text { text: "ДАТА И ЗАПУСК"; color: #8390a1; font-size: 8px; font-weight: 650; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: "РЕЗУЛЬТАТ"; color: #8390a1; font-size: 8px; font-weight: 650; width: 115px; vertical-alignment: center; }
+                    Text { text: "СТРАНА"; color: #8390a1; font-size: 8px; font-weight: 650; width: 105px; vertical-alignment: center; }
+                    Text { text: "PING"; color: #8390a1; font-size: 8px; font-weight: 650; width: 65px; vertical-alignment: center; }
+                    Text { text: "СКОРОСТЬ"; color: #8390a1; font-size: 8px; font-weight: 650; width: 90px; vertical-alignment: center; }
+                }
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                min-height: 80px;
+                VerticalLayout {
+                    if root.observations.length == 0: Text { text: "История наблюдений отсутствует"; color: #8390a1; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; height: 100%; }
+                    for observation in root.observations: Rectangle {
+                        height: 42px;
+                        background: observation-item.has-hover ? #f5f9fc : #ffffff;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 1px;
+                                Text { text: observation.time + " · запуск #" + observation.run; color: #516177; font-size: 9px; height: 14px; vertical-alignment: center; overflow: elide; }
+                                Text { text: observation.summary; color: #8b96a6; font-size: 8px; height: 12px; vertical-alignment: center; overflow: elide; }
+                            }
+                            Text { text: observation.status; color: observation.status == "Доступен" ? #087847 : #aa4b41; font-size: 9px; font-weight: 600; width: 115px; vertical-alignment: center; overflow: elide; }
+                            Text { text: observation.country; color: #516177; font-size: 9px; width: 105px; vertical-alignment: center; overflow: elide; }
+                            Text { text: observation.ping; color: #516177; font-size: 9px; width: 65px; vertical-alignment: center; }
+                            Text { text: observation.speed; color: #516177; font-size: 9px; width: 90px; vertical-alignment: center; overflow: elide; }
+                        }
+                        observation-item := TouchArea { }
+                        Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: #eef1f5; }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ArchiveScreen inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> vpn-only: false;
+    in property <[DatabaseRow]> rows: [];
+    in property <string> total: "0";
+    in property <string> page-label: "Страница 1";
+    in property <bool> has-previous: false;
+    in property <bool> has-next: false;
+    in property <string> database-path;
+    in property <bool> detail-open: false;
+    in property <string> detail-id: "";
+    in property <string> detail-address: "";
+    in property <string> detail-protocol: "";
+    in property <string> detail-name: "";
+    in property <string> detail-country: "";
+    in property <string> detail-status: "";
+    in property <string> detail-ping: "—";
+    in property <string> detail-speed: "—";
+    in property <string> detail-first-seen: "";
+    in property <string> detail-last-seen: "";
+    in property <string> detail-checks: "0";
+    in property <string> detail-available: "0";
+    in property <string> detail-success-rate: "—";
+    in property <string> detail-average-ping: "—";
+    in property <string> detail-best-speed: "—";
+    in property <[ArchiveObservationRow]> detail-observations: [];
+    in property <string> rechecking-id: "";
+    in-out property <string> search-query: "";
+    in property <int> focus-request: -1;
+    in property <string> error-message: "";
+    callback search-changed(string);
+    callback page-changed(int);
+    callback select-row(string);
+    callback recheck-row(string);
+    callback close-detail;
+    changed focus-request => { if root.focus-request >= 0 { database-search.focus(); } }
+    horizontal-stretch: 1;
+    height: 100%;
+    background: #f5f7f9;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            preferred-height: 100%;
+            padding-top: 24px;
+            padding-left: 22px;
+            padding-right: 19px;
+            padding-bottom: 20px;
+            spacing: 16px;
+
+            PageTitle { title: root.title; subtitle: root.subtitle; }
+
+            Rectangle {
+                height: 66px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #e2e7ee;
+                background: #ffffff;
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        height: 100%;
+                        vertical-stretch: 1;
+                        alignment: center;
+                        Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: 8px;
+                            background: #edf5fc;
+                            Image {
+                                x: 8px;
+                                y: 8px;
+                                source: root.vpn-only ? @image-url("icons/nav-db-vpn.svg") : @image-url("icons/nav-db-proxy.svg");
+                                width: 18px;
+                                height: 18px;
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 100%;
+                        vertical-stretch: 1;
+                        Text {
+                            x: 0px;
+                            y: (parent.height - 37px) / 2;
+                            width: parent.width;
+                            height: 20px;
+                            text: root.total + " уникальных находок";
+                            color: #263448;
+                            font-size: 14px;
+                            font-weight: 650;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            x: 0px;
+                            y: (parent.height - 37px) / 2 + 22px;
+                            width: parent.width;
+                            height: 15px;
+                            text: root.vpn-only ? "Только VPN-протоколы · отдельная страница архива" : "Только HTTP/SOCKS-прокси · VPN показан отдельно";
+                            color: #7a8798;
+                            font-size: 10px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle { }
+                    Text { text: "SQLite · локально"; color: #637187; font-size: 10px; vertical-alignment: center; }
+                }
+            }
+
+            if root.error-message != "": Rectangle {
+                height: 42px;
+                border-radius: 7px;
+                border-width: 1px;
+                border-color: #efcfcd;
+                background: #fff7f6;
+                Text { x: 14px; y: 0px; width: parent.width - 28px; height: parent.height; text: root.error-message; color: #a43c36; font-size: 11px; vertical-alignment: center; overflow: elide; }
+            }
+
+            Rectangle {
+                height: 44px;
+                border-radius: 7px;
+                border-width: 1px;
+                border-color: #dce3eb;
+                background: #ffffff;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        height: 100%;
+                        alignment: center;
+                        Image { source: @image-url("icons/search.svg"); width: 16px; height: 16px; }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 100%;
+                        if root.search-query == "": Text { x: 0px; y: 0px; width: parent.width; height: parent.height; text: "Поиск по адресу, протоколу или имени"; color: #8995a5; font-size: 11px; vertical-alignment: center; }
+                        database-search := TextInput {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            text <=> root.search-query;
+                            color: #263448;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            edited => root.search-changed(self.text);
+                            key-pressed(event) => {
+                                if event.modifiers.control {
+                                    if event.text == "a" || event.text == "A" { self.select-all(); accept }
+                                    else if event.text == "c" || event.text == "C" { self.copy(); accept }
+                                    else if event.text == "x" || event.text == "X" { self.cut(); accept }
+                                    else if event.text == "v" || event.text == "V" { self.paste(); accept }
+                                    else if (event.text == "z" || event.text == "Z") && event.modifiers.shift { self.redo(); accept }
+                                    else if (event.text == "z" || event.text == "Z") { self.undo(); accept }
+                                    else if event.text == "y" || event.text == "Y" { self.redo(); accept }
+                                    else { reject }
+                                } else { reject }
+                            }
+                        }
+                    }
+                    Text { text: "Префиксный поиск"; color: #9aa4b2; font-size: 9px; vertical-alignment: center; }
+                }
+            }
+
+            Rectangle {
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #e2e7ee;
+                background: #ffffff;
+                clip: true;
+                vertical-stretch: 1;
+                VerticalLayout {
+                    height: 100%;
+                    spacing: 0px;
+                    Rectangle {
+                        height: 42px;
+                        background: #fafbfc;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            spacing: 10px;
+                            Text { text: "УЗЕЛ"; color: #718096; font-size: 9px; font-weight: 650; horizontal-stretch: 36; vertical-alignment: center; }
+                            Text { text: "ПРОТОКОЛ"; color: #718096; font-size: 9px; font-weight: 650; width: 84px; vertical-alignment: center; }
+                            Text { text: "СТРАНА"; color: #718096; font-size: 9px; font-weight: 650; width: 118px; vertical-alignment: center; }
+                            Text { text: "СТАТУС"; color: #718096; font-size: 9px; font-weight: 650; width: 90px; vertical-alignment: center; }
+                            Text { text: "PING"; color: #718096; font-size: 9px; font-weight: 650; width: 58px; vertical-alignment: center; }
+                            Text { text: "СКОРОСТЬ"; color: #718096; font-size: 9px; font-weight: 650; width: 72px; vertical-alignment: center; }
+                            Text { text: "ВПЕРВЫЕ"; color: #718096; font-size: 9px; font-weight: 650; width: 100px; vertical-alignment: center; }
+                            Text { text: "ПОСЛЕДНИЙ РАЗ"; color: #718096; font-size: 9px; font-weight: 650; width: 100px; vertical-alignment: center; }
+                            Text { text: "ПРОВЕРОК"; color: #718096; font-size: 9px; font-weight: 650; width: 52px; horizontal-alignment: right; vertical-alignment: center; }
+                            Text { text: ""; width: 34px; }
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; width: parent.width; background: #e6eaef; }
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        min-height: 250px;
+                        VerticalLayout {
+                            if root.rows.length == 0: VerticalLayout {
+                                height: 100%;
+                                min-height: 250px;
+                                alignment: center;
+                                spacing: 7px;
+                                Text { text: root.search-query == "" ? "Пока нет сохранённых находок" : "Ничего не найдено"; color: #344257; font-size: 15px; font-weight: 650; horizontal-alignment: center; }
+                                Text { text: root.search-query == "" ? "После завершения проверки результаты появятся здесь." : "Измените запрос и попробуйте ещё раз."; color: #7a8798; font-size: 11px; horizontal-alignment: center; }
+                            }
+
+                            for row in root.rows: Rectangle {
+                                height: 54px;
+                                background: row-item.has-hover ? #f5f9fc : #ffffff;
+                                row-item := TouchArea { clicked => root.select-row(row.id); }
+                                HorizontalLayout {
+                                    width: 100%;
+                                    height: 100%;
+                                    padding-left: 16px;
+                                    padding-right: 16px;
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 36;
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text { text: row.address; color: #263448; font-size: 11px; font-weight: 600; height: 16px; overflow: elide; }
+                                        if row.name != "": Text { text: row.name; color: #8793a3; font-size: 9px; height: 13px; overflow: elide; }
+                                    }
+                                    Text { text: row.protocol; color: #516177; font-size: 10px; width: 84px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: row.country; color: #516177; font-size: 10px; width: 118px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: row.status; color: row.status == "Доступен" ? #087847 : row.status == "Не прошёл" ? #aa4b41 : #617086; font-size: 9px; font-weight: 600; width: 90px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: row.ping; color: #516177; font-size: 9px; width: 58px; vertical-alignment: center; }
+                                    Text { text: row.speed; color: #516177; font-size: 9px; width: 72px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: row.first-seen; color: #718096; font-size: 9px; width: 100px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: row.last-seen; color: #516177; font-size: 9px; width: 100px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: row.checks; color: #516177; font-size: 10px; width: 52px; horizontal-alignment: right; vertical-alignment: center; }
+                                    VerticalLayout {
+                                        width: 34px;
+                                        height: 100%;
+                                        vertical-stretch: 1;
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 34px;
+                                            height: 32px;
+                                            border-radius: 6px;
+                                            background: recheck-area.pressed ? #e4f0f9 : recheck-area.has-hover ? #edf5fb : transparent;
+                                            Text {
+                                                x: 0px;
+                                                y: 0px;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                text: root.rechecking-id == row.id ? "…" : "↻";
+                                                color: root.rechecking-id == row.id ? #8b96a6 : #155da2;
+                                                font-size: 17px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            recheck-area := TouchArea {
+                                                x: 0px; y: 0px; width: 100%; height: 100%;
+                                                enabled: root.rechecking-id == "";
+                                                mouse-cursor: pointer;
+                                                clicked => root.recheck-row(row.id);
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #eef1f5; }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: #e6eaef; }
+                    HorizontalLayout {
+                        height: 56px;
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 7px;
+                        VerticalLayout { alignment: center;
+                            Text { text: root.rows.length == 0 ? "Показано 0 из " + root.total : "Показано " + root.rows.length + " из " + root.total; color: #7a8798; font-size: 10px; vertical-alignment: center; }
+                        }
+                        Rectangle { }
+                        HorizontalLayout {
+                            height: 100%;
+                            spacing: 7px;
+                            VerticalLayout {
+                                height: 100%;
+                                alignment: center;
+                                Text { text: root.page-label; color: #718096; font-size: 10px; vertical-alignment: center; }
+                            }
+                            Rectangle { width: 4px; }
+                            VerticalLayout {
+                                height: 100%;
+                                alignment: center;
+                                Rectangle {
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.has-previous ? (prev-area.has-hover ? #b8cde1 : #dce3eb) : #edf0f4;
+                                    background: root.has-previous && prev-area.has-hover ? #f5f9fc : #ffffff;
+                                    Text { text: "‹"; color: root.has-previous ? #52647a : #b4bdc8; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                                    prev-area := TouchArea { enabled: root.has-previous; clicked => root.page-changed(-1); }
+                                }
+                            }
+                            VerticalLayout {
+                                height: 100%;
+                                alignment: center;
+                                Rectangle {
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.has-next ? (next-area.has-hover ? #b8cde1 : #dce3eb) : #edf0f4;
+                                    background: root.has-next && next-area.has-hover ? #f5f9fc : #ffffff;
+                                    Text { text: "›"; color: root.has-next ? #52647a : #b4bdc8; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+                                    next-area := TouchArea { enabled: root.has-next; clicked => root.page-changed(1); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text { text: "Файл базы данных: " + root.database-path; color: #8b96a6; font-size: 9px; height: 16px; overflow: elide; }
+        }
+    }
+
+    ArchiveDetailDialog {
+        opened: root.detail-open;
+        busy: root.rechecking-id == root.detail-id && root.detail-id != "";
+        address: root.detail-address;
+        protocol: root.detail-protocol;
+        name: root.detail-name;
+        country: root.detail-country;
+        status: root.detail-status;
+        ping: root.detail-ping;
+        speed: root.detail-speed;
+        first-seen: root.detail-first-seen;
+        last-seen: root.detail-last-seen;
+        checks: root.detail-checks;
+        available: root.detail-available;
+        success-rate: root.detail-success-rate;
+        average-ping: root.detail-average-ping;
+        best-speed: root.detail-best-speed;
+        observations: root.detail-observations;
+        close => root.close-detail();
+        recheck => root.recheck-row(root.detail-id);
+    }
+}
+
+component ProfilePreset inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <string> workers;
+    in property <string> timeout;
+    in property <string> threshold;
+    in property <string> speed-label;
+    in property <string> geoip-label;
+    in property <color> accent;
+    callback apply;
+    height: 272px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #e2e7ee;
+    background: #ffffff;
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: 3px; background: root.accent; }
+    VerticalLayout {
+        padding: 16px;
+        spacing: 5px;
+        Text { text: root.title; color: #243247; font-size: 16px; font-weight: 700; height: 22px; }
+        Text { text: root.description; color: #718096; font-size: 11px; height: 34px; wrap: word-wrap; }
+        Rectangle { height: 1px; background: #edf0f4; }
+        HorizontalLayout { height: 20px; spacing: 8px;
+            Text { text: "Потоки"; color: #7a8798; font-size: 10px; width: 100px; vertical-alignment: center; }
+            Text { text: root.workers; color: #344257; font-size: 11px; font-weight: 600; horizontal-stretch: 1; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+        }
+        HorizontalLayout { height: 20px; spacing: 8px;
+            Text { text: "Таймаут"; color: #7a8798; font-size: 10px; width: 100px; vertical-alignment: center; }
+            Text { text: root.timeout; color: #344257; font-size: 11px; font-weight: 600; horizontal-stretch: 1; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+        }
+        HorizontalLayout { height: 20px; spacing: 8px;
+            Text { text: "Порог скорости"; color: #7a8798; font-size: 10px; width: 100px; vertical-alignment: center; }
+            Text { text: root.threshold; color: #344257; font-size: 11px; font-weight: 600; horizontal-stretch: 1; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+        }
+        HorizontalLayout { height: 20px; spacing: 8px;
+            Text { text: "Замер скорости"; color: #7a8798; font-size: 10px; width: 100px; vertical-alignment: center; }
+            Text { text: root.speed-label; color: #344257; font-size: 10px; font-weight: 600; horizontal-stretch: 1; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+        }
+        HorizontalLayout { height: 20px; spacing: 8px;
+            Text { text: "GeoIP"; color: #7a8798; font-size: 10px; width: 100px; vertical-alignment: center; }
+            Text { text: root.geoip-label; color: #344257; font-size: 10px; font-weight: 600; horizontal-stretch: 1; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+        }
+    }
+    preset-apply := SecondaryAction {
+        x: 16px;
+        y: parent.height - 48px;
+        label: "Применить";
+        button-width: 104px;
+        height: 32px;
+        clicked => root.apply();
+    }
+}
+
+export component ProfilesScreen inherits Rectangle {
+    in property <string> worker-count-value;
+    in property <string> timeout-value;
+    in property <string> threshold-value;
+    in property <string> threshold-unit;
+    in property <bool> use-speed;
+    in property <bool> use-geoip;
+    callback apply-profile(string);
+    horizontal-stretch: 1;
+    height: 100%;
+    background: #f5f7f9;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            padding-top: 24px;
+            padding-left: 22px;
+            padding-right: 19px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            PageTitle { title: "Профили"; subtitle: "Готовые настройки для разной глубины проверки"; }
+            Rectangle {
+                height: 64px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #dce4ed;
+                background: #ffffff;
+                HorizontalLayout { height: 100%; padding-left: 18px; padding-right: 18px; spacing: 8px;
+                    VerticalLayout { height: 100%; alignment: center;
+                        Image { source: @image-url("icons/nav-settings.svg"); width: 18px; height: 18px; }
+                    }
+                    VerticalLayout { alignment: center; spacing: 2px;
+                        Text { text: "Текущие параметры"; color: #344257; font-size: 12px; font-weight: 600; height: 17px; }
+                        Text { text: root.worker-count-value + " потоков · таймаут " + root.timeout-value + " сек · порог " + root.threshold-value + " " + root.threshold-unit + " · скорость " + (root.use-speed ? "вкл." : "выкл.") + " · GeoIP " + (root.use-geoip ? "вкл." : "выкл."); color: #718096; font-size: 10px; height: 15px; }
+                    }
+                    Rectangle { }
+                    Text { text: "Выберите профиль, чтобы применить его к следующему запуску."; color: #7a8798; font-size: 10px; vertical-alignment: center; }
+                }
+            }
+            HorizontalLayout {
+                width: 100%;
+                horizontal-stretch: 1;
+                height: 272px;
+                spacing: 14px;
+                quick-profile := ProfilePreset {
+                    width: (root.width - 70px) / 3;
+                    horizontal-stretch: 1;
+                    title: "Быстрая проверка";
+                    description: "Больше параллельных проверок, короткий таймаут, без замера пропускной способности.";
+                    workers: "64";
+                    timeout: "5 сек";
+                    threshold: "Не используется";
+                    speed-label: "Выключен";
+                    geoip-label: "Выключен";
+                    accent: #078a98;
+                    apply => root.apply-profile("quick");
+                }
+                balanced-profile := ProfilePreset {
+                    width: (root.width - 70px) / 3;
+                    horizontal-stretch: 1;
+                    title: "Сбалансированный";
+                    description: "Оптимальный вариант для повседневной проверки каталога и подписок.";
+                    workers: "32";
+                    timeout: "10 сек";
+                    threshold: "100 КБ/с";
+                    speed-label: "Включен";
+                    geoip-label: "Включен";
+                    accent: #1269c4;
+                    apply => root.apply-profile("balanced");
+                }
+                detailed-profile := ProfilePreset {
+                    width: (root.width - 70px) / 3;
+                    horizontal-stretch: 1;
+                    title: "Подробная проверка";
+                    description: "Ждёт медленные узлы дольше, измеряет скорость и определяет страны.";
+                    workers: "16";
+                    timeout: "20 сек";
+                    threshold: "100 КБ/с";
+                    speed-label: "Включен";
+                    geoip-label: "Включен";
+                    accent: #7a52e8;
+                    apply => root.apply-profile("detailed");
+                }
+            }
+            Rectangle {
+                height: 66px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #e2e7ee;
+                background: #ffffff;
+                HorizontalLayout { height: 100%; padding-left: 18px; padding-right: 18px; spacing: 10px;
+                    VerticalLayout { height: 100%; alignment: center;
+                        Image { source: @image-url("icons/info-circle.svg"); width: 18px; height: 18px; }
+                    }
+                    Text { text: "Профиль меняет число потоков, таймаут, порог и переключатели скорости и GeoIP. Подписки и каталог сохраняются."; color: #718096; font-size: 11px; vertical-alignment: center; }
+                    Rectangle { }
+                    VerticalLayout { height: 100%; alignment: center;
+                        profiles-return-to-check := SecondaryAction { label: "К настройкам запуска"; button-width: 164px; clicked => root.apply-profile("current"); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component RuntimeScreen inherits Rectangle {
+    in property <string> data-directory;
+    in property <string> core-status;
+    in property <string> core-path;
+    in property <string> geoip-status;
+    in property <string> geoip-path;
+    in property <string> core-detail;
+    in property <string> geoip-detail;
+    in property <string> core-action-label;
+    in property <string> geoip-action-label;
+    in property <string> runtime-message;
+    in property <bool> runtime-busy;
+    callback open-data-directory;
+    callback refresh-runtime-status;
+    callback manage-core;
+    callback manage-geoip;
+    horizontal-stretch: 1;
+    height: 100%;
+    background: #f5f7f9;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            padding-top: 24px;
+            padding-left: 22px;
+            padding-right: 19px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            HorizontalLayout {
+                height: 54px;
+                PageTitle { title: "Ядра и GeoIP"; subtitle: "Локальные компоненты, которые используются при проверке"; }
+                Rectangle { }
+                VerticalLayout { height: 100%; alignment: center;
+                    runtime-refresh := SecondaryAction { label: root.runtime-busy ? "Отменить операцию" : "Проверить обновления"; button-width: 172px; clicked => root.refresh-runtime-status(); }
+                }
+            }
+            HorizontalLayout {
+                height: 204px;
+                spacing: 14px;
+                xray-status-card := ResourceStatusCard {
+                    horizontal-stretch: 1;
+                    title: "Xray Core";
+                    state: root.core-status;
+                    description: "Официальное ядро Xray запускает проверку скорости. ProxySift устанавливает и обновляет его отдельно.";
+                    detail: root.core-detail;
+                    path: root.core-path;
+                    action-label: root.core-action-label;
+                    busy: root.runtime-busy;
+                    icon: @image-url("icons/nav-network.svg");
+                    action => root.manage-core();
+                }
+                geoip-status-card := ResourceStatusCard {
+                    horizontal-stretch: 1;
+                    title: "База GeoIP";
+                    state: root.geoip-status;
+                    description: "Определяет страну прокси по IP-адресу. Проверяйте дату релиза и обновляйте базу вручную.";
+                    detail: root.geoip-detail;
+                    path: root.geoip-path;
+                    action-label: root.geoip-action-label;
+                    busy: root.runtime-busy;
+                    icon: @image-url("icons/nav-overview.svg");
+                    action => root.manage-geoip();
+                }
+            }
+            Rectangle {
+                height: 112px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #e2e7ee;
+                background: #ffffff;
+                HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 12px;
+                    VerticalLayout { alignment: center;
+                        Rectangle { width: 38px; height: 38px; border-radius: 7px; background: #f0f5fa;
+                            VerticalLayout { alignment: center; HorizontalLayout { alignment: center;
+                                Image { source: @image-url("icons/folder.svg"); width: 20px; height: 20px; colorize: #526981; }
+                            } }
+                        }
+                    }
+                    VerticalLayout { alignment: center; spacing: 4px;
+                        Text { text: "Папка данных ProxySift"; color: #243247; font-size: 14px; font-weight: 650; height: 20px; }
+                        Text { text: root.data-directory; color: #718096; font-size: 10px; height: 16px; overflow: elide; }
+                    }
+                    Rectangle { }
+                    VerticalLayout { height: 100%; alignment: center;
+                        runtime-open-data-folder := SecondaryAction { label: "Открыть папку"; button-width: 132px; clicked => root.open-data-directory(); }
+                    }
+                }
+            }
+            Rectangle {
+                height: 64px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: #dce4ed;
+                background: #ffffff;
+                HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 10px;
+                    VerticalLayout { height: 100%; alignment: center;
+                        Image { source: @image-url("icons/check-circle.svg"); width: 18px; height: 18px; }
+                    }
+                    Text { text: root.runtime-message; color: #718096; font-size: 11px; vertical-alignment: center; }
+                }
+            }
+            Text { text: "This product includes GeoLite Data created by MaxMind, available from https://www.maxmind.com."; color: #8a96a7; font-size: 9px; height: 14px; }
+        }
+    }
+}

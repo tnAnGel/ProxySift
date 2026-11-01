@@ -1,0 +1,15 @@
+[package]
+name = "proxy-singbox"
+version = "0.1.0"
+edition = "2021"
+description = "Render sing-box JSON configs from proxy-rs xray-style proxy records"
+license = "MIT"
+
+[lib]
+name = "proxy_singbox"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }

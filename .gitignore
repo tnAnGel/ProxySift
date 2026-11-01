@@ -1,0 +1,10 @@
+/target/
+/dist/
+/.proxy_cache/
+/.proxy_runtime/
+/proxy-sift-data/
+/.codex/
+/raw.txt
+/parsed.txt
+*.tmp
+.DS_Store

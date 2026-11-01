@@ -1,0 +1,32 @@
+export component StatusPulse inherits Rectangle {
+    in property <color> accent: #0a8a4a;
+    in property <bool> pulsing: true;
+
+    property <float> pulse-phase: root.pulsing ? (1 + sin(360deg * animation-tick() / 1.8s)) / 2 : 0;
+
+    width: 30px;
+    height: 30px;
+    background: transparent;
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px + 14px * root.pulse-phase;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: transparent;
+        border-width: 2px;
+        border-color: root.accent;
+        opacity: 0.72 * (1 - root.pulse-phase);
+        visible: root.pulsing;
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: root.accent;
+    }
+}
