@@ -122,13 +122,19 @@ pub async fn run_with_options(
             candidates.push(proxy);
         }
     }
-    let parsed_manual = forward_proxy::parse_subscription_with_report(pasted_links);
-    valid_lines += parsed_manual.valid_lines;
-    invalid_lines += parsed_manual.invalid_lines;
-    for proxy in parsed_manual.proxies {
+    let (manual_proxies, manual_valid, manual_invalid, manual_sources) =
+        parse_manual_proxy_sources(pasted_links);
+    valid_lines += manual_valid;
+    invalid_lines += manual_invalid;
+    for proxy in manual_proxies {
         source_by_fingerprint
             .entry(proxy.fingerprint.clone())
-            .or_insert_with(|| "Вставлено вручную".to_owned());
+            .or_insert_with(|| {
+                manual_sources
+                    .get(&proxy.fingerprint)
+                    .cloned()
+                    .unwrap_or_else(|| "Вставлено вручную".to_owned())
+            });
         candidates.push(proxy);
     }
     candidates = deduplicate(candidates);
@@ -228,6 +234,91 @@ pub async fn run_with_options(
         });
     }
     Ok(output)
+}
+
+/// Parse manually supplied proxies while preserving optional provenance markers
+/// emitted by the saved-source collector. Each marker applies to the proxy
+/// lines that follow it until the next marker.
+fn parse_manual_proxy_sources(
+    input: &str,
+) -> (Vec<ForwardProxy>, usize, usize, HashMap<String, String>) {
+    const SOURCE_MARKER: &str = "# ProxySift-Source:";
+
+    if !input.lines().any(|line| line.trim().starts_with(SOURCE_MARKER)) {
+        let parsed = forward_proxy::parse_subscription_with_report(input);
+        let sources = parsed
+            .proxies
+            .iter()
+            .map(|proxy| (proxy.fingerprint.clone(), "Вставлено вручную".to_owned()))
+            .collect();
+        return (
+            parsed.proxies,
+            parsed.valid_lines,
+            parsed.invalid_lines,
+            sources,
+        );
+    }
+
+    let mut proxies = Vec::new();
+    let mut sources = HashMap::new();
+    let mut valid = 0;
+    let mut invalid = 0;
+    let mut section = String::new();
+    let mut source = "Вставлено вручную".to_owned();
+
+    let flush = |section: &mut String,
+                 source: &str,
+                 proxies: &mut Vec<ForwardProxy>,
+                 sources: &mut HashMap<String, String>,
+                 valid: &mut usize,
+                 invalid: &mut usize| {
+        if section.trim().is_empty() {
+            section.clear();
+            return;
+        }
+        let parsed = forward_proxy::parse_subscription_with_report(section);
+        *valid += parsed.valid_lines;
+        *invalid += parsed.invalid_lines;
+        for proxy in parsed.proxies {
+            sources
+                .entry(proxy.fingerprint.clone())
+                .or_insert_with(|| source.to_owned());
+            proxies.push(proxy);
+        }
+        section.clear();
+    };
+
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix(SOURCE_MARKER) {
+            flush(
+                &mut section,
+                &source,
+                &mut proxies,
+                &mut sources,
+                &mut valid,
+                &mut invalid,
+            );
+            let value = value.trim();
+            source = url::Url::parse(value)
+                .ok()
+                .filter(|url| matches!(url.scheme(), "http" | "https"))
+                .map(|_| value.to_owned())
+                .unwrap_or_else(|| "Вставлено вручную".to_owned());
+        } else {
+            section.push_str(line);
+            section.push('\n');
+        }
+    }
+    flush(
+        &mut section,
+        &source,
+        &mut proxies,
+        &mut sources,
+        &mut valid,
+        &mut invalid,
+    );
+    (proxies, valid, invalid, sources)
 }
 
 fn report(progress: &ProgressCallback, phase: &str, detail: impl Into<String>) {

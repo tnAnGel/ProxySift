@@ -11,9 +11,9 @@ use crate::speed;
 use crate::tcp_ping;
 use crate::xray::{self, SpeedOpts};
 use colored::Colorize;
-use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
+use rand::SeedableRng;
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -79,6 +79,8 @@ fn emit_progress(
 
 #[derive(serde::Serialize)]
 struct SpeedReportEntry<'a> {
+    fingerprint: String,
+    failure_reason: Option<String>,
     source_id: Option<String>,
     name: &'a str,
     protocol: &'a str,
@@ -89,6 +91,73 @@ struct SpeedReportEntry<'a> {
     min_kbs: Option<f64>,
     max_kbs: Option<f64>,
     probes: Option<Vec<speed::ProbeResult>>,
+}
+
+fn vpn_speed_failure_reason(
+    key: &str,
+    speed_measurements: &HashMap<String, speed::MeasurementSummary>,
+    speed_probe_results: &HashMap<String, Vec<speed::ProbeResult>>,
+    unchecked_keys: &HashSet<String>,
+    bad_outbound_rejections: &HashMap<String, &'static str>,
+    min_kb: f64,
+) -> Option<String> {
+    if let Some(kind) = bad_outbound_rejections.get(key) {
+        return Some(
+            match *kind {
+                "unknown_config_field" => "Xray отклонил конфигурацию: неизвестное поле.",
+                "unknown_protocol" => "Xray не распознал протокол узла.",
+                "unsupported_feature" => "Xray не поддерживает параметры этого узла.",
+                "missing_config_value" => "В конфигурации не хватает обязательного параметра.",
+                "invalid_config_value" => "В конфигурации указано некорректное значение.",
+                _ => "Xray не смог принять конфигурацию узла.",
+            }
+            .to_owned(),
+        );
+    }
+    if unchecked_keys.contains(key) {
+        return Some("Ядро Xray пропустило проверку этого протокола.".to_owned());
+    }
+
+    let Some(measurement) = speed_measurements.get(key) else {
+        return Some("Xray не вернул результат проверки этого узла.".to_owned());
+    };
+    if measurement.successful_probes > 0 {
+        if measurement.median_kbs < min_kb {
+            return Some(format!(
+                "Скорость ниже порога: {:.1} КБ/с при минимуме {:.1} КБ/с.",
+                measurement.median_kbs, min_kb
+            ));
+        }
+        return None;
+    }
+
+    let mut reasons = BTreeMap::<String, usize>::new();
+    if let Some(probes) = speed_probe_results.get(key) {
+        for failure in probes
+            .iter()
+            .filter_map(|probe| probe.failure_reason.as_ref())
+        {
+            let label = match failure {
+                speed::ProbeFailure::HttpStatus { status } => format!("HTTP {status}"),
+                speed::ProbeFailure::Timeout => "таймаут".to_owned(),
+                speed::ProbeFailure::Request => "ошибка запроса".to_owned(),
+                speed::ProbeFailure::Body => "ошибка чтения ответа".to_owned(),
+                speed::ProbeFailure::TooSmall => "ответ меньше 1 КБ".to_owned(),
+                speed::ProbeFailure::InvalidSpeed => "не удалось измерить скорость".to_owned(),
+            };
+            *reasons.entry(label).or_default() += 1;
+        }
+    }
+    if reasons.is_empty() {
+        return Some("Xray не получил успешный ответ от тестовых серверов.".to_owned());
+    }
+    let details = reasons
+        .into_iter()
+        .take(3)
+        .map(|(reason, count)| format!("{reason} × {count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!("Замер скорости не удался: {details}."))
 }
 
 pub(super) fn default_geoip_path() -> anyhow::Result<PathBuf> {
@@ -849,6 +918,8 @@ async fn run_inner(mut cli: Cli, callback: Option<ProgressCallback>) -> anyhow::
     let mut good: Vec<Proxy> = Vec::new();
     let mut speed_measurements = HashMap::new();
     let mut speed_probe_results = HashMap::new();
+    let mut bad_outbound_rejections = HashMap::new();
+    let mut unchecked_keys = HashSet::new();
 
     phase!("5/6", "ПРОВЕРКА СКОРОСТИ");
     emit_progress(
@@ -926,7 +997,7 @@ async fn run_inner(mut cli: Cli, callback: Option<ProgressCallback>) -> anyhow::
         sum.speed_secs = t.elapsed().as_secs_f64();
         sum.speed_passed = passed.len();
         sum.bad_outbounds = checker.bad_outbounds();
-        let bad_outbound_rejections = checker.bad_outbound_rejections();
+        bad_outbound_rejections = checker.bad_outbound_rejections();
         let mut rejection_groups = BTreeMap::<String, u64>::new();
         for proxy in &candidates {
             let key = proxy.key();
@@ -953,7 +1024,7 @@ async fn run_inner(mut cli: Cli, callback: Option<ProgressCallback>) -> anyhow::
         }
         speed_measurements = checker.speed_measurements();
         speed_probe_results = checker.speed_probe_results();
-        let unchecked_keys = checker.speed_unchecked_keys();
+        unchecked_keys = checker.speed_unchecked_keys();
         sum.speed_unchecked = unchecked_keys.len();
         sum.speed_total = candidates.len().saturating_sub(unchecked_keys.len());
 
@@ -1084,10 +1155,20 @@ async fn run_inner(mut cli: Cli, callback: Option<ProgressCallback>) -> anyhow::
         let rows: Vec<_> = candidates
             .iter()
             .map(|proxy| {
-                let measurement = speed_measurements.get(&proxy.key());
+                let key = proxy.key();
+                let measurement = speed_measurements.get(&key);
                 SpeedReportEntry {
+                    fingerprint: proxy.fingerprint(),
+                    failure_reason: vpn_speed_failure_reason(
+                        &key,
+                        &speed_measurements,
+                        &speed_probe_results,
+                        &unchecked_keys,
+                        &bad_outbound_rejections,
+                        cli.min_kb,
+                    ),
                     source_id: source_owner
-                        .get(&proxy.key())
+                        .get(&key)
                         .map(|index| source_quality.sources[*index].source_id.clone()),
                     name: if proxy.display.is_empty() {
                         &proxy.name
@@ -1101,7 +1182,7 @@ async fn run_inner(mut cli: Cli, callback: Option<ProgressCallback>) -> anyhow::
                     successful_probes: measurement.map(|value| value.successful_probes),
                     min_kbs: measurement.and_then(|value| value.min_kbs),
                     max_kbs: measurement.and_then(|value| value.max_kbs),
-                    probes: speed_probe_results.get(&proxy.key()).map(|probes| {
+                    probes: speed_probe_results.get(&key).map(|probes| {
                         probes
                             .iter()
                             .cloned()
@@ -1435,11 +1516,9 @@ PY
                     );
                     stream.write_all(response.as_bytes()).await.unwrap();
                 } else {
-                    assert!(
-                        String::from_utf8_lossy(&request)
-                            .to_ascii_lowercase()
-                            .contains("if-none-match: \"fixture-v1\"")
-                    );
+                    assert!(String::from_utf8_lossy(&request)
+                        .to_ascii_lowercase()
+                        .contains("if-none-match: \"fixture-v1\""));
                     stream
                         .write_all(b"HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n")
                         .await
@@ -1561,11 +1640,9 @@ PY
             summary.clash_file.as_ref().map(|(_, count)| *count),
             Some(2)
         );
-        assert!(
-            std::fs::read_to_string(temp.path("good.txt"))
-                .unwrap()
-                .contains("local-unit-speed-node")
-        );
+        assert!(std::fs::read_to_string(temp.path("good.txt"))
+            .unwrap()
+            .contains("local-unit-speed-node"));
         let clash = std::fs::read_to_string(temp.path("clash.yaml")).unwrap();
         assert!(clash.contains("local-unit-speed-node"), "{clash}");
         assert!(clash.contains("proxy-groups:"), "{clash}");
@@ -1586,12 +1663,10 @@ PY
         assert_eq!(probes[0]["status"], "success");
         assert!(probes[0]["speed_kbs"].as_f64().unwrap() > 0.0);
         assert!(probes[0]["failure_reason"].is_null());
-        assert!(
-            probes[0]["target_url"]
-                .as_str()
-                .unwrap()
-                .contains("[redacted]")
-        );
+        assert!(probes[0]["target_url"]
+            .as_str()
+            .unwrap()
+            .contains("[redacted]"));
         assert_eq!(
             summary.singbox_file.as_ref().map(|(_, count)| *count),
             Some(2)
@@ -1799,11 +1874,9 @@ PY
 
         assert_eq!(summary.alive, 0);
         assert_eq!(summary.dead_file.as_ref().map(|(_, count)| *count), Some(1));
-        assert!(
-            std::fs::read_to_string(dead_path)
-                .unwrap()
-                .contains(&format!("127.0.0.2:{port}"))
-        );
+        assert!(std::fs::read_to_string(dead_path)
+            .unwrap()
+            .contains(&format!("127.0.0.2:{port}")));
         assert_eq!(std::fs::read_to_string(json_path).unwrap(), "[]");
         let report: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
@@ -1888,11 +1961,9 @@ PY
         assert_eq!(summary.links, 1);
         assert_eq!(summary.unique, 1);
         assert_eq!(summary.alive, 1);
-        assert!(
-            std::fs::read_to_string(temp.path("parsed.txt"))
-                .unwrap()
-                .contains("fetched-resume")
-        );
+        assert!(std::fs::read_to_string(temp.path("parsed.txt"))
+            .unwrap()
+            .contains("fetched-resume"));
         assert_eq!(
             checkpoint::Checkpoint::load(checkpoint_path)
                 .unwrap()
@@ -1912,11 +1983,9 @@ PY
 
         let error = run(options).await.unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("checkpoint для --resume не найден")
-        );
+        assert!(error
+            .to_string()
+            .contains("checkpoint для --resume не найден"));
     }
 
     #[tokio::test]
@@ -1932,11 +2001,9 @@ PY
 
         let error = run(options).await.unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("checkpoint ещё не содержит завершённый этап парсинга")
-        );
+        assert!(error
+            .to_string()
+            .contains("checkpoint ещё не содержит завершённый этап парсинга"));
     }
 
     #[tokio::test]
@@ -1969,11 +2036,9 @@ PY
         let error = run(options).await.unwrap_err();
         source_server.await.unwrap();
 
-        assert!(
-            error
-                .to_string()
-                .contains("не удалось загрузить ни одного источника (ошибок: 1)")
-        );
+        assert!(error
+            .to_string()
+            .contains("не удалось загрузить ни одного источника (ошибок: 1)"));
     }
 
     #[tokio::test]
@@ -1989,11 +2054,9 @@ PY
 
         let error = run(options).await.unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("checkpoint не содержит прокси для продолжения")
-        );
+        assert!(error
+            .to_string()
+            .contains("checkpoint не содержит прокси для продолжения"));
     }
 
     #[tokio::test]
@@ -2057,11 +2120,9 @@ PY
 
         let error = run(options).await.unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("не найдено ни одного подходящего прокси")
-        );
+        assert!(error
+            .to_string()
+            .contains("не найдено ни одного подходящего прокси"));
     }
 
     #[tokio::test]
@@ -2171,16 +2232,12 @@ PY
         assert!(summary.geo);
         assert_eq!(summary.geo_countries, 1);
         assert_eq!(summary.alive, 1);
-        assert!(
-            std::fs::read_to_string(temp.path("parsed.txt"))
-                .unwrap()
-                .contains("[US] - 001")
-        );
-        assert!(
-            std::fs::read_to_string(temp.path("alive.txt"))
-                .unwrap()
-                .contains("[US] - 001")
-        );
+        assert!(std::fs::read_to_string(temp.path("parsed.txt"))
+            .unwrap()
+            .contains("[US] - 001"));
+        assert!(std::fs::read_to_string(temp.path("alive.txt"))
+            .unwrap()
+            .contains("[US] - 001"));
     }
 
     #[cfg(unix)]
@@ -2362,11 +2419,9 @@ PY
 
         assert!(summary.geo);
         assert_eq!(summary.alive, 1);
-        assert!(
-            std::fs::read_to_string(output)
-                .unwrap()
-                .contains("resume.example")
-        );
+        assert!(std::fs::read_to_string(output)
+            .unwrap()
+            .contains("resume.example"));
     }
 
     #[tokio::test]
@@ -2493,11 +2548,9 @@ PY
         assert_eq!(summary.good, 0);
         assert_eq!(summary.dead_file.as_ref().map(|(_, count)| *count), Some(1));
         assert_eq!(std::fs::read_to_string(output).unwrap(), "");
-        assert!(
-            std::fs::read_to_string(dead)
-                .unwrap()
-                .contains("slow.example")
-        );
+        assert!(std::fs::read_to_string(dead)
+            .unwrap()
+            .contains("slow.example"));
         let saved = checkpoint::Checkpoint::load(checkpoint_path)
             .unwrap()
             .unwrap();
@@ -2672,11 +2725,9 @@ PY
         assert_eq!(summary.tcp_alive, 0);
         assert_eq!(summary.alive, 0);
         assert_eq!(std::fs::read_to_string(&json_path).unwrap(), "[]");
-        assert!(
-            std::fs::read_to_string(&dead_path)
-                .unwrap()
-                .contains(&format!("127.0.0.1:{port}"))
-        );
+        assert!(std::fs::read_to_string(&dead_path)
+            .unwrap()
+            .contains(&format!("127.0.0.1:{port}")));
         let report: serde_json::Value =
             serde_json::from_slice(&std::fs::read(report_path).unwrap()).unwrap();
         assert_eq!(report["sources"].as_array().unwrap().len(), 0);

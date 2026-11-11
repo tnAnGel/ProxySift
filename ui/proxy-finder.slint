@@ -1,0 +1,527 @@
+import { ScrollView } from "std-widgets.slint";
+
+export struct ProxySearchQuery {
+    id: string,
+    query: string,
+    enabled: bool,
+}
+
+export struct ProxySearchEngine {
+    id: string,
+    name: string,
+    selected: bool,
+}
+
+export struct ProxyFinderProvider {
+    id: string,
+    name: string,
+    status: string,
+    detail: string,
+    credential_configured: bool,
+}
+
+export struct ProxySearchResult {
+    id: string,
+    title: string,
+    url: string,
+    engine: string,
+    snippet: string,
+    saved_snapshot: bool,
+    saved_rolling: bool,
+}
+
+export struct ProxySavedSource {
+    id: string,
+    title: string,
+    url: string,
+    feed_type: string,
+    last_collected: string,
+    last_status: string,
+    node_count: string,
+    selected: bool,
+}
+
+component FinderSectionTitle inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <string> count: "";
+    height: 54px;
+    background: transparent;
+    HorizontalLayout {
+        height: 100%;
+        padding-left: 18px;
+        padding-right: 16px;
+        spacing: 8px;
+        VerticalLayout {
+            height: 100%;
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.title; color: #243247; font-size: 14px; font-weight: 650; height: 19px; vertical-alignment: center; }
+            Text { text: root.detail; color: #77859a; font-size: 10px; height: 15px; vertical-alignment: center; }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if root.count != "": Rectangle {
+            width: 34px;
+            height: 22px;
+            border-radius: 11px;
+            background: #eef3f8;
+            Text { text: root.count; color: #52647a; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+}
+
+component FinderButton inherits Rectangle {
+    in property <string> label;
+    in property <length> button-width: 120px;
+    in property <bool> primary: false;
+    in property <bool> disabled: false;
+    callback clicked;
+    width: button-width;
+    height: 34px;
+    border-radius: 6px;
+    border-width: root.primary ? 0px : 1px;
+    border-color: root.disabled ? #e5e9ef : action-area.has-hover ? #b8cde1 : #dce3eb;
+    background: root.disabled ? #f2f4f7 : root.primary ? (action-area.pressed ? #0e4f87 : action-area.has-hover ? #1269ad : #155da2) : (action-area.pressed ? #e8f1f8 : action-area.has-hover ? #f5f9fc : #ffffff);
+    Text { text: root.label; color: root.disabled ? #8a96a7 : root.primary ? #ffffff : #155da2; font-size: 11px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+    action-area := TouchArea { enabled: !root.disabled; clicked => root.clicked(); }
+}
+
+component FinderIconAction inherits Rectangle {
+    in property <string> label;
+    in property <bool> danger: false;
+    in property <bool> disabled: false;
+    callback clicked;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: root.disabled ? transparent : action-area.pressed ? #fcebea : action-area.has-hover ? (root.danger ? #fff0ee : #edf4fa) : transparent;
+    Text { text: root.label; color: root.disabled ? #b7c0cb : root.danger ? #b94b43 : #64748a; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; }
+    action-area := TouchArea { enabled: !root.disabled; clicked => root.clicked(); }
+}
+
+component FinderStatusPill inherits Rectangle {
+    in property <string> status;
+    in property <string> label;
+    property <bool> ready: root.status == "ready";
+    height: 22px;
+    width: 86px;
+    border-radius: 11px;
+    background: root.ready ? #e7f5ed : root.status == "loading" ? #fff4e5 : #fcebea;
+    Text {
+        text: root.label;
+        color: root.ready ? #137342 : root.status == "loading" ? #9a610e : #ae4840;
+        font-size: 10px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component ProxyFinderScreen inherits Rectangle {
+    in property <[ProxySearchQuery]> queries: [];
+    in property <[ProxySearchEngine]> engines: [];
+    in property <[ProxyFinderProvider]> providers: [];
+    in property <[ProxySearchResult]> search-results: [];
+    in property <[ProxySavedSource]> saved-sources: [];
+    in property <[string]> errors: [];
+    in property <string> search-status: "Поиск готов к запуску";
+    in property <bool> searching: false;
+    in property <bool> collecting: false;
+    in property <bool> sending-to-check: false;
+    in property <int> progress-done: 0;
+    in property <int> progress-total: 0;
+    in property <string> progress-rate: "—";
+    in property <string> collected-node-count: "0";
+    in property <string> product-name: "ProxySift";
+
+    callback query-edited(string, string);
+    callback query-enabled-changed(string, bool);
+    callback query-added;
+    callback query-removed(string);
+    callback search;
+    callback engine-toggled(string, bool);
+    callback engines-select-all(bool);
+    callback provider-action(string);
+    // classification is "snapshot" or "rolling"; source_url is the result URL.
+    callback save-result-source(string, string);
+    // provider_id is "serpapi", "github", or "brave".
+    callback provider-credential-save(string, string);
+    callback source-selection-changed(string, bool);
+    callback source-removed(string);
+    callback collect-selected;
+    callback collect-all;
+    callback send-collected-to-check;
+    callback clear-errors;
+
+    horizontal-stretch: 1;
+    height: 100%;
+    background: #f5f7f9;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+            padding-top: 22px;
+            padding-left: 22px;
+            padding-right: 22px;
+            padding-bottom: 24px;
+            spacing: 14px;
+
+            HorizontalLayout {
+                height: 58px;
+                spacing: 12px;
+                VerticalLayout {
+                    height: 100%;
+                    alignment: center;
+                    spacing: 2px;
+                    Text { text: "Поиск источников прокси"; color: #172336; font-size: 27px; font-weight: 700; height: 32px; vertical-alignment: center; }
+                    Text { text: root.product-name + " · находите открытые списки, сохраняйте и обновляйте источники"; color: #637187; font-size: 12px; height: 17px; vertical-alignment: center; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    height: 100%;
+                    alignment: center;
+                    Text { text: "ПОИСК ИСТОЧНИКОВ"; color: #54708f; font-size: 9px; font-weight: 700; letter-spacing: 0.6px; height: 20px; vertical-alignment: center; }
+                }
+            }
+
+            Rectangle {
+                border-radius: 9px;
+                border-width: 1px;
+                border-color: #e2e7ee;
+                background: #ffffff;
+                VerticalLayout {
+                    spacing: 0px;
+                    FinderSectionTitle { title: "Поисковые запросы"; detail: "Добавьте фразы, по которым искать публичные прокси-листы"; count: root.queries.length; }
+                    Rectangle { height: 1px; background: #edf0f4; }
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 5px;
+                        for query[index] in root.queries: Rectangle {
+                            height: 44px;
+                            border-radius: 6px;
+                            background: query-row-area.has-hover ? #f7f9fc : transparent;
+                            HorizontalLayout {
+                                height: 100%;
+                                padding-left: 8px;
+                                padding-right: 5px;
+                                spacing: 9px;
+                                VerticalLayout { width: 20px; height: 100%; alignment: center;
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 5px;
+                                        background: query.enabled ? #e7f1fa : #f0f2f5;
+                                        Text { text: (index + 1) + ""; color: query.enabled ? #155da2 : #8a96a7; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 32px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 5px;
+                                    border-width: 1px;
+                                    border-color: query-input.has-focus ? #8cb8dc : #e3e8ee;
+                                    background: #ffffff;
+                                    query-input := TextInput {
+                                        x: 10px; y: 0px; width: parent.width - 20px; height: parent.height;
+                                        text: query.query; color: #344257; font-size: 11px; vertical-alignment: center;
+                                        edited => root.query-edited(query.id, self.text);
+                                    }
+                                }
+                                VerticalLayout {
+                                    width: 32px; height: 100%; alignment: center;
+                                    Rectangle {
+                                        width: 28px; height: 28px; border-radius: 6px;
+                                        background: query.enabled ? #eaf4ee : toggle-query-area.has-hover ? #edf1f5 : transparent;
+                                        Text { text: query.enabled ? "✓" : "○"; color: query.enabled ? #16804b : #8a96a7; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                                        toggle-query-area := TouchArea { clicked => root.query-enabled-changed(query.id, !query.enabled); }
+                                    }
+                                }
+                                VerticalLayout {
+                                    width: 32px; height: 100%; alignment: center;
+                                    FinderIconAction { label: "×"; danger: true; clicked => root.query-removed(query.id); }
+                                }
+                            }
+                            query-row-area := TouchArea { enabled: false; }
+                        }
+                        HorizontalLayout {
+                            height: 38px;
+                            padding-left: 2px;
+                            VerticalLayout {
+                                height: 100%; alignment: center;
+                                FinderButton { label: "+ Добавить запрос"; button-width: 142px; clicked => root.query-added(); }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            VerticalLayout {
+                                height: 100%; alignment: center;
+                                FinderButton { label: root.searching ? "Ищем…" : "Найти источники"; button-width: 154px; primary: true; disabled: root.searching; clicked => root.search(); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 14px;
+                Rectangle {
+                    horizontal-stretch: 60;
+                    border-radius: 9px; border-width: 1px; border-color: #e2e7ee; background: #ffffff;
+                    VerticalLayout {
+                        spacing: 0px;
+                        FinderSectionTitle { title: "Поисковые системы"; detail: "Выберите площадки для поиска"; }
+                        Rectangle { height: 1px; background: #edf0f4; }
+                        VerticalLayout {
+                            padding-left: 14px; padding-right: 14px; padding-top: 8px; padding-bottom: 8px; spacing: 4px;
+                            HorizontalLayout {
+                                height: 34px;
+                                Rectangle { horizontal-stretch: 1; }
+                                VerticalLayout { height: 100%; alignment: center;
+                                    FinderButton { label: "Выбрать все"; button-width: 104px; clicked => root.engines-select-all(true); }
+                                }
+                                VerticalLayout { height: 100%; alignment: center;
+                                    FinderButton { label: "Снять выбор"; button-width: 104px; clicked => root.engines-select-all(false); }
+                                }
+                            }
+                            for engine[index] in root.engines: Rectangle {
+                                height: 36px; border-radius: 5px;
+                                background: engine-row-area.has-hover ? #f7f9fc : transparent;
+                                HorizontalLayout { height: 100%; padding-left: 8px; padding-right: 8px; spacing: 9px;
+                                    VerticalLayout { width: 17px; height: 100%; alignment: center;
+                                        Rectangle {
+                                            width: 17px; height: 17px; border-radius: 4px; border-width: 1px;
+                                            border-color: engine.selected ? #155da2 : #cbd3dd;
+                                            background: engine.selected ? #155da2 : #ffffff;
+                                            Text { text: engine.selected ? "✓" : ""; color: #ffffff; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                        }
+                                    }
+                                    Text { text: engine.name; color: #344257; font-size: 11px; horizontal-stretch: 1; vertical-alignment: center; }
+                                    VerticalLayout { width: 22px; height: 100%; alignment: center;
+                                        Text { text: engine.id == "google" ? "G" : engine.id == "yandex" ? "Я" : engine.id == "github" ? "⌘" : engine.id == "brave" ? "B" : engine.id == "bing" ? "bi" : engine.id == "duckduckgo" ? "D" : "?"; color: #8a96a7; font-size: 10px; font-weight: 700; width: 22px; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                                engine-row-area := TouchArea { width: 100%; height: 100%; clicked => root.engine-toggled(engine.id, !engine.selected); }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 40;
+                    border-radius: 9px; border-width: 1px; border-color: #e2e7ee; background: #ffffff;
+                    VerticalLayout {
+                        spacing: 0px;
+                        FinderSectionTitle { title: "Доступ к поиску"; detail: "Состояние ключей и настроек провайдеров"; }
+                        Rectangle { height: 1px; background: #edf0f4; }
+                        VerticalLayout {
+                            padding: 10px; spacing: 5px;
+                            for provider[index] in root.providers: Rectangle {
+                                height: provider.id == "serpapi" || provider.id == "github" || provider.id == "brave" ? 88px : 48px;
+                                border-radius: 6px;
+                                background: #ffffff;
+                                border-width: 1px; border-color: #edf0f4;
+                                VerticalLayout {
+                                    HorizontalLayout { height: 46px; padding-left: 10px; padding-right: 8px; spacing: 7px;
+                                        VerticalLayout { horizontal-stretch: 1; height: 100%; alignment: center; spacing: 2px;
+                                            Text { text: provider.name; color: #2b394c; font-size: 11px; font-weight: 600; height: 15px; vertical-alignment: center; }
+                                            Text { text: provider.detail; color: #8a96a7; font-size: 9px; height: 13px; vertical-alignment: center; overflow: elide; }
+                                        }
+                                        VerticalLayout { height: 100%; alignment: center;
+                                            FinderStatusPill { status: provider.status; label: provider.status == "ready" ? "Готово" : provider.status == "loading" ? "Проверка" : "Настроить"; }
+                                        }
+                                        if provider.id == "serpapi" || provider.id == "github" || provider.id == "brave": VerticalLayout { height: 100%; alignment: center;
+                                            FinderStatusPill { status: provider.credential_configured ? "ready" : "missing"; label: provider.credential_configured ? "Ключ задан" : "Нет ключа"; }
+                                        }
+                                        VerticalLayout { width: 30px; height: 100%; alignment: center;
+                                            FinderIconAction { label: "⋯"; clicked => root.provider-action(provider.id); }
+                                        }
+                                    }
+                                    if provider.id == "serpapi" || provider.id == "github" || provider.id == "brave": HorizontalLayout {
+                                        height: 34px; padding-left: 10px; padding-right: 8px; padding-bottom: 7px; spacing: 7px;
+                                        Rectangle {
+                                            horizontal-stretch: 1; height: 28px;
+                                            border-radius: 5px; border-width: 1px; border-color: provider-secret-input.has-focus ? #8cb8dc : #e3e8ee;
+                                            background: #ffffff;
+                                            if provider-secret-input.text == "": Text {
+                                                x: 9px; y: 0px; width: parent.width - 18px; height: parent.height;
+                                                text: "Введите API-ключ"; color: #8995a5; font-size: 10px; vertical-alignment: center;
+                                            }
+                                            provider-secret-input := TextInput {
+                                                x: 9px; y: 0px; width: parent.width - 18px; height: parent.height;
+                                                input-type: password;
+                                                color: #344257; font-size: 10px; vertical-alignment: center;
+                                                // The secret stays only in this masked field until submitted.
+                                            }
+                                        }
+                                        VerticalLayout { height: 100%; alignment: center;
+                                            FinderButton {
+                                                label: "Сохранить ключ"; button-width: 104px;
+                                                disabled: provider-secret-input.text == "";
+                                                clicked => {
+                                                    root.provider-credential-save(provider.id, provider-secret-input.text);
+                                                    provider-secret-input.text = "";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                            Text { text: "Ключи и параметры можно настроить отдельно для каждого провайдера."; color: #8a96a7; font-size: 9px; height: 28px; wrap: word-wrap; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                border-radius: 9px; border-width: 1px; border-color: #e2e7ee; background: #ffffff;
+                VerticalLayout {
+                    spacing: 0px;
+                    HorizontalLayout {
+                        height: 54px; padding-right: 16px; spacing: 8px;
+                        FinderSectionTitle { horizontal-stretch: 1; title: "Результаты поиска"; detail: root.search-status; count: root.search-results.length; }
+                        VerticalLayout { height: 100%; alignment: center;
+                            FinderButton { label: root.searching ? "Обновляем…" : "Обновить поиск"; button-width: 130px; disabled: root.searching; clicked => root.search(); }
+                        }
+                    }
+                    Rectangle { height: 1px; background: #edf0f4; }
+                    if root.search-results.length == 0: Rectangle {
+                        height: 74px;
+                        Text { text: root.searching ? "Ищем публичные списки прокси…" : "Здесь появятся найденные сайты и подписки"; color: #8995a5; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    VerticalLayout {
+                        padding: 8px; spacing: 5px;
+                        for result[index] in root.search-results: Rectangle {
+                            height: 78px; border-radius: 6px;
+                            background: result-row-area.has-hover ? #f7f9fc : #ffffff;
+                            border-width: 1px; border-color: #edf0f4;
+                            HorizontalLayout { height: 100%; padding-left: 12px; padding-right: 10px; spacing: 12px;
+                                VerticalLayout { horizontal-stretch: 1; height: 100%; alignment: center; spacing: 3px;
+                                    Text { text: result.title; color: #253449; font-size: 11px; font-weight: 600; height: 17px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: result.url; color: #2671ad; font-size: 9px; height: 14px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: result.snippet; color: #7a8798; font-size: 9px; height: 14px; vertical-alignment: center; overflow: elide; }
+                                }
+                                VerticalLayout { width: 82px; height: 100%; alignment: center;
+                                    Rectangle { width: 70px; height: 19px; border-radius: 9px; background: #eef3f8;
+                                        Text { text: result.engine; color: #54708f; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                                VerticalLayout { height: 100%; alignment: center;
+                                    HorizontalLayout { height: 34px; spacing: 5px;
+                                        FinderButton {
+                                            label: result.saved_snapshot ? "✓ Снимок" : "Снимок";
+                                            button-width: 72px;
+                                            disabled: result.saved_snapshot;
+                                            clicked => root.save-result-source(result.url, "snapshot");
+                                        }
+                                        FinderButton {
+                                            label: result.saved_rolling ? "✓ Лента" : "Лента";
+                                            button-width: 68px;
+                                            disabled: result.saved_rolling;
+                                            clicked => root.save-result-source(result.url, "rolling");
+                                        }
+                                    }
+                                }
+                            }
+                            result-row-area := TouchArea { enabled: false; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                border-radius: 9px; border-width: 1px; border-color: #e2e7ee; background: #ffffff;
+                VerticalLayout {
+                    spacing: 0px;
+                    HorizontalLayout {
+                        height: 54px; padding-right: 16px; spacing: 6px;
+                        FinderSectionTitle { horizontal-stretch: 1; title: "Сохранённые источники"; detail: "Снимки страниц и постоянно обновляемые ленты"; count: root.saved-sources.length; }
+                        VerticalLayout { height: 100%; alignment: center;
+                            FinderButton { label: "Собрать выбранные"; button-width: 142px; disabled: root.collecting; clicked => root.collect-selected(); }
+                        }
+                        VerticalLayout { height: 100%; alignment: center;
+                            FinderButton { label: "Собрать все"; button-width: 108px; primary: true; disabled: root.collecting; clicked => root.collect-all(); }
+                        }
+                    }
+                    Rectangle { height: 1px; background: #edf0f4; }
+                    if root.saved-sources.length == 0: Rectangle {
+                        height: 76px;
+                        Text { text: "Сохраните источник из результатов поиска, чтобы собирать из него узлы"; color: #8995a5; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    VerticalLayout {
+                        padding: 8px; spacing: 4px;
+                        for source[index] in root.saved-sources: Rectangle {
+                            height: 58px; border-radius: 6px;
+                            background: source-row-area.has-hover ? #f7f9fc : #ffffff;
+                            border-width: 1px; border-color: #edf0f4;
+                            HorizontalLayout { height: 100%; padding-left: 9px; padding-right: 7px; spacing: 9px;
+                                VerticalLayout { width: 28px; height: 100%; alignment: center;
+                                    Rectangle { width: 18px; height: 18px; border-radius: 4px; border-width: 1px; border-color: source.selected ? #155da2 : #cbd3dd; background: source.selected ? #155da2 : #ffffff;
+                                        Text { text: source.selected ? "✓" : ""; color: #ffffff; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                        source-select-area := TouchArea { clicked => root.source-selection-changed(source.id, !source.selected); }
+                                    }
+                                }
+                                VerticalLayout { horizontal-stretch: 1; height: 100%; alignment: center; spacing: 2px;
+                                    Text { text: source.title; color: #2b394c; font-size: 10px; font-weight: 600; height: 16px; vertical-alignment: center; overflow: elide; }
+                                    Text { text: source.url; color: #718096; font-size: 9px; height: 13px; vertical-alignment: center; overflow: elide; }
+                                }
+                                VerticalLayout { width: source.feed_type == "rolling" ? 104px : 78px; height: 100%; alignment: center;
+                                    Rectangle { width: source.feed_type == "rolling" ? 104px : 78px; height: 18px; border-radius: 9px; background: source.feed_type == "rolling" ? #eaf4ee : #edf3fa;
+                                        Text { text: source.feed_type == "rolling" ? "Лента" : "Снимок"; color: source.feed_type == "rolling" ? #167348 : #416d99; font-size: 9px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                    }
+                                }
+                                VerticalLayout { width: 150px; height: 100%; alignment: center; spacing: 2px;
+                                    Text { text: source.last_status + " · " + source.last_collected; color: #718096; font-size: 9px; height: 13px; vertical-alignment: center; horizontal-alignment: right; }
+                                    Text { text: source.node_count + " узлов"; color: #344257; font-size: 10px; font-weight: 600; height: 14px; vertical-alignment: center; horizontal-alignment: right; }
+                                }
+                                VerticalLayout { width: 32px; height: 100%; alignment: center;
+                                    FinderIconAction { label: "×"; danger: true; clicked => root.source-removed(source.id); }
+                                }
+                            }
+                            source-row-area := TouchArea { enabled: false; }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                border-radius: 9px; border-width: 1px; border-color: #dce4ed; background: #ffffff;
+                VerticalLayout {
+                    padding: 14px; spacing: 10px;
+                    HorizontalLayout { height: 30px; spacing: 9px;
+                        VerticalLayout { height: 100%; alignment: center;
+                            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.collecting ? #e39a24 : #0a8a4a; }
+                        }
+                        Text { text: root.collecting ? "Сбор источников выполняется" : "Состояние сбора"; color: #2b394c; font-size: 12px; font-weight: 650; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: root.progress-done + " / " + root.progress-total + " · примерно " + root.progress-rate + " узл./с"; color: #637187; font-size: 10px; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        height: 7px; border-radius: 4px; background: #edf1f5;
+                        Rectangle { width: root.progress-total > 0 ? parent.width * min(100, max(0, root.progress-done * 100 / root.progress-total)) / 100 : 0px; height: parent.height; border-radius: 4px; background: #2782c4; }
+                    }
+                    HorizontalLayout { height: 38px; spacing: 8px;
+                        Text { text: "Собрано узлов: " + root.collected-node-count; color: #53647a; font-size: 10px; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout { height: 100%; alignment: center;
+                            FinderButton { label: root.sending-to-check ? "Передаём…" : "Отправить в проверку прокси"; button-width: 208px; primary: true; disabled: root.sending-to-check; clicked => root.send-collected-to-check(); }
+                        }
+                    }
+                    if root.errors.length > 0: Rectangle {
+                        border-radius: 6px; border-width: 1px; border-color: #f0d4d1; background: #fff8f7;
+                        VerticalLayout { padding: 10px; spacing: 4px;
+                            HorizontalLayout { height: 24px;
+                                Text { text: "Ошибки сбора · " + root.errors.length; color: #a9433c; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                Rectangle { horizontal-stretch: 1; }
+                                VerticalLayout { height: 100%; alignment: center;
+                                    FinderIconAction { label: "×"; danger: true; clicked => root.clear-errors(); }
+                                }
+                            }
+                            for error[index] in root.errors: Text { text: "• " + error; color: #9c514b; font-size: 9px; height: 15px; vertical-alignment: center; overflow: elide; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

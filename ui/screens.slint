@@ -30,6 +30,7 @@ export struct ArchiveObservationRow {
     country: string,
     ping: string,
     speed: string,
+    failure_reason: string,
     summary: string,
 }
 
@@ -373,7 +374,7 @@ export component SourcesScreen inherits Rectangle {
             spacing: 16px;
             HorizontalLayout {
                 height: 54px;
-                PageTitle { title: "Источники"; subtitle: "Каталог ProxySift, подписки и добавленные вручную прокси"; }
+                PageTitle { title: "Источники"; subtitle: root.checker-mode == "forward" ? "URL-источники HTTP/SOCKS и прокси для ручной проверки" : "VPN-каталог, VPN-подписки и добавленные вручную узлы"; }
                 Rectangle { }
                 VerticalLayout { height: 100%; alignment: center;
                     sources-start-check := PrimaryAction { label: "Начать проверку"; button-width: 164px; clicked => root.start-check(); }
@@ -389,8 +390,8 @@ export component SourcesScreen inherits Rectangle {
                     border-color: #e2e7ee;
                     background: #ffffff;
                     VerticalLayout { alignment: center; padding-left: 18px; spacing: 4px;
-                        Text { text: "ВСТРОЕННЫЙ КАТАЛОГ"; color: #6b7789; font-size: 10px; font-weight: 600; height: 15px; }
-                        Text { text: root.source-count-label; color: #172336; font-size: 16px; font-weight: 650; height: 26px; }
+                        Text { text: root.checker-mode == "forward" ? "ИСТОЧНИКИ ПРОКСИ" : "ВСТРОЕННЫЙ VPN-КАТАЛОГ"; color: #6b7789; font-size: 10px; font-weight: 600; height: 15px; }
+                        Text { text: root.checker-mode == "forward" ? root.subscription-summary : root.source-count-label; color: #172336; font-size: 16px; font-weight: 650; height: 26px; }
                     }
                 }
                 Rectangle {
@@ -400,8 +401,8 @@ export component SourcesScreen inherits Rectangle {
                     border-color: #e2e7ee;
                     background: #ffffff;
                     VerticalLayout { alignment: center; padding-left: 18px; spacing: 4px;
-                        Text { text: "ПОДПИСКИ"; color: #6b7789; font-size: 10px; font-weight: 600; height: 15px; }
-                        Text { text: root.subscription-summary; color: #172336; font-size: 16px; font-weight: 650; height: 26px; }
+                        Text { text: root.checker-mode == "forward" ? "ОБЩАЯ БАЗА ПРОКСИ" : "VPN-ПОДПИСКИ"; color: #6b7789; font-size: 10px; font-weight: 600; height: 15px; }
+                        Text { text: root.checker-mode == "forward" ? "Результаты всех проверок" : root.subscription-summary; color: #172336; font-size: 16px; font-weight: 650; height: 26px; }
                     }
                 }
                 Rectangle {
@@ -419,7 +420,7 @@ export component SourcesScreen inherits Rectangle {
             HorizontalLayout {
                 height: 425px;
                 spacing: 14px;
-                Rectangle {
+                if root.checker-mode != "forward": Rectangle {
                     horizontal-stretch: 57;
                     border-radius: 8px;
                     border-width: 1px;
@@ -484,12 +485,13 @@ export component SourcesScreen inherits Rectangle {
                         }
                         Rectangle { height: 1px; background: #edf0f4; }
                         HorizontalLayout { height: 42px; padding-left: 16px; padding-right: 16px;
-                            Text { text: root.catalog-edit-error != "" ? root.catalog-edit-error : root.checker-mode == "forward" ? "Встроенный каталог используется только в VPN-режиме." : "Каталог включается в каждый запуск, когда переключатель активен."; color: root.catalog-edit-error == "" ? #7a8798 : #b53d36; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                            Text { text: root.catalog-edit-error != "" ? root.catalog-edit-error : "VPN-каталог включается в каждый запуск, когда переключатель активен."; color: root.catalog-edit-error == "" ? #7a8798 : #b53d36; font-size: 10px; vertical-alignment: center; overflow: elide; }
                         }
                     }
                 }
                 VerticalLayout {
-                    horizontal-stretch: 42;
+                    width: root.checker-mode == "forward" ? 100% : 0%;
+                    horizontal-stretch: root.checker-mode == "forward" ? 100 : 42;
                     spacing: 14px;
                     Rectangle {
                         height: 255px;
@@ -504,7 +506,7 @@ export component SourcesScreen inherits Rectangle {
                                     Image { source: @image-url("icons/nav-link.svg"); width: 19px; height: 19px; }
                                 }
                                 VerticalLayout { height: 100%; alignment: center;
-                                    Text { text: "Ваши подписки"; color: #243247; font-size: 15px; font-weight: 650; height: 22px; vertical-alignment: center; }
+                                    Text { text: root.checker-mode == "forward" ? "URL-источники прокси" : "VPN-подписки"; color: #243247; font-size: 15px; font-weight: 650; height: 22px; vertical-alignment: center; }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                                 VerticalLayout { height: 100%; alignment: center;
@@ -519,8 +521,8 @@ export component SourcesScreen inherits Rectangle {
                                 HorizontalLayout { width: 100%; alignment: center;
                                     Image { source: @image-url("icons/nav-link.svg"); width: 22px; height: 22px; colorize: #9aacc0; }
                                 }
-                                Text { width: 100%; text: "Подписок пока нет"; color: #405066; font-size: 13px; font-weight: 600; horizontal-alignment: center; }
-                                Text { width: 100%; text: "Добавьте URL, и ProxySift загрузит его при проверке."; color: #7a8798; font-size: 10px; horizontal-alignment: center; }
+                                Text { width: 100%; text: root.checker-mode == "forward" ? "URL-источники пока не добавлены" : "VPN-подписки пока не добавлены"; color: #405066; font-size: 13px; font-weight: 600; horizontal-alignment: center; }
+                                Text { width: 100%; text: root.checker-mode == "forward" ? "Добавьте URL списка. Узлы будут проверены и сохранены в общей базе прокси." : "Добавьте URL, и ProxySift загрузит его при проверке."; color: #7a8798; font-size: 10px; horizontal-alignment: center; }
                             }
                             if root.subscription-lines.length > 0: ScrollView {
                                 height: 145px;
@@ -540,7 +542,7 @@ export component SourcesScreen inherits Rectangle {
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                                 VerticalLayout { height: 100%; alignment: center;
-                                    Text { text: "URL загружаются при запуске"; color: #8490a1; font-size: 9px; vertical-alignment: center; }
+                                    Text { text: root.checker-mode == "forward" ? "Загрузка при запуске · запись в общую базу" : "URL загружаются при запуске"; color: #8490a1; font-size: 9px; vertical-alignment: center; }
                                 }
                             }
                         }
@@ -601,40 +603,49 @@ export component HistoryScreen inherits Rectangle {
                 border-width: 1px;
                 border-color: #e2e7ee;
                 background: #ffffff;
-                HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 12px;
-                    Rectangle {
-                        width: 42px;
+                VerticalLayout {
+                    width: 100%;
+                    height: 100%;
+                    alignment: center;
+                    HorizontalLayout {
                         height: 42px;
-                        border-radius: 9px;
-                        background: #edf5fc;
-                        Text {
-                            x: 0px;
-                            y: 0px;
-                            width: parent.width;
-                            height: parent.height;
-                            text: "" + root.run-history.length;
-                            color: #0069b5;
-                            font-size: 18px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 42px;
+                            height: 42px;
+                            border-radius: 9px;
+                            background: #edf5fc;
+                            Text {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                text: "" + root.run-history.length;
+                                color: #0069b5;
+                                font-size: 18px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
                         }
-                    }
-                    VerticalLayout {
-                                        width: 34px;
-                        height: 100%;
-                        alignment: center;
-                        spacing: 2px;
-                        Text { text: "Сохранено запусков"; color: #344257; font-size: 12px; font-weight: 600; vertical-alignment: center; }
-                        Text { text: "Последние проверки"; color: #8491a3; font-size: 10px; vertical-alignment: center; }
-                    }
-                    Rectangle { }
-                    VerticalLayout {
-                        height: 100%;
-                        alignment: center;
-                        spacing: 2px;
-                        Text { text: "ЛИМИТ ИСТОРИИ"; color: #9aa4b2; font-size: 8px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
-                        Text { text: "50 последних запусков"; color: #718096; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: "Сохранено запусков"; color: #344257; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+                            Text { text: "Последние проверки"; color: #8491a3; font-size: 10px; vertical-alignment: center; }
+                        }
+                        Rectangle { }
+                        VerticalLayout {
+                            height: 100%;
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: "ЛИМИТ ИСТОРИИ"; color: #9aa4b2; font-size: 8px; font-weight: 600; horizontal-alignment: right; vertical-alignment: center; }
+                            Text { text: "50 последних запусков"; color: #718096; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
+                        }
                     }
                 }
             }
@@ -788,19 +799,24 @@ component ArchiveDetailDialog inherits Rectangle {
                         Text { text: root.address; color: #263448; font-size: 16px; font-weight: 700; height: 21px; overflow: elide; }
                         Text { text: root.protocol + (root.name == "" ? "" : " · Метка: " + root.name); color: #718096; font-size: 10px; height: 15px; overflow: elide; }
                     }
-                    Rectangle {
+                    VerticalLayout {
                         width: 104px;
-                        height: 26px;
-                        border-radius: 13px;
-                        background: root.status == "Доступен" ? #e4f6ed : root.status == "Не прошёл" ? #fff0ee : #fff5e8;
-                        Text {
-                            text: root.status;
-                            color: root.status == "Доступен" ? #087847 : root.status == "Не прошёл" ? #b53d36 : #a96608;
-                            font-size: 10px;
-                            font-weight: 650;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            overflow: elide;
+                        height: 100%;
+                        alignment: center;
+                        Rectangle {
+                            width: 104px;
+                            height: 26px;
+                            border-radius: 13px;
+                            background: root.status == "Доступен" ? #e4f6ed : root.status == "Не прошёл" ? #fff0ee : #fff5e8;
+                            Text {
+                                text: root.status;
+                                color: root.status == "Доступен" ? #087847 : root.status == "Не прошёл" ? #b53d36 : #a96608;
+                                font-size: 10px;
+                                font-weight: 650;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
                         }
                     }
                 }
@@ -825,8 +841,10 @@ component ArchiveDetailDialog inherits Rectangle {
             }
             Rectangle { height: 6px; }
             Rectangle { height: 1px; background: #e8edf2; }
+            Rectangle { height: 12px; }
             HorizontalLayout {
                 height: 38px;
+                spacing: 10px;
                 Text { text: "Последние проверки"; color: #263448; font-size: 14px; font-weight: 650; vertical-alignment: center; }
                 Rectangle { width: 1px; height: 14px; background: #dce3eb; }
                 Text { text: "Всего: " + root.checks; color: #8390a1; font-size: 10px; vertical-alignment: center; }
@@ -852,7 +870,7 @@ component ArchiveDetailDialog inherits Rectangle {
                 VerticalLayout {
                     if root.observations.length == 0: Text { text: "История наблюдений отсутствует"; color: #8390a1; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; height: 100%; }
                     for observation in root.observations: Rectangle {
-                        height: 42px;
+                        height: observation.failure_reason == "" ? 42px : 54px;
                         background: observation-item.has-hover ? #f5f9fc : #ffffff;
                         HorizontalLayout {
                             padding-left: 8px;
@@ -863,8 +881,14 @@ component ArchiveDetailDialog inherits Rectangle {
                                 spacing: 1px;
                                 Text { text: observation.time + " · запуск #" + observation.run; color: #516177; font-size: 9px; height: 14px; vertical-alignment: center; overflow: elide; }
                                 Text { text: observation.summary; color: #8b96a6; font-size: 8px; height: 12px; vertical-alignment: center; overflow: elide; }
+                                if observation.failure_reason != "": Text { text: "Причина: " + observation.failure_reason; color: #b53d36; font-size: 8px; height: 13px; vertical-alignment: center; overflow: elide; }
                             }
-                            Text { text: observation.status; color: observation.status == "Доступен" ? #087847 : #aa4b41; font-size: 9px; font-weight: 600; width: 115px; vertical-alignment: center; overflow: elide; }
+                            VerticalLayout {
+                                width: 115px;
+                                height: 100%;
+                                alignment: center;
+                                Text { text: observation.status; color: observation.status == "Доступен" ? #087847 : #aa4b41; font-size: 9px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                            }
                             Text { text: observation.country; color: #516177; font-size: 9px; width: 105px; vertical-alignment: center; overflow: elide; }
                             Text { text: observation.ping; color: #516177; font-size: 9px; width: 65px; vertical-alignment: center; }
                             Text { text: observation.speed; color: #516177; font-size: 9px; width: 90px; vertical-alignment: center; overflow: elide; }

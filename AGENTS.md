@@ -1,5 +1,16 @@
 # Project agent instructions
 
+## CodeGraph
+
+- Keep this repository indexed with CodeGraph. If `.codegraph/` is missing, initialize it with `codegraph init` before exploring or editing source code; if it is stale, run `codegraph sync` or `codegraph index` before continuing.
+- For every code task, check CodeGraph status and query it before locating, reading, or editing source symbols (`codegraph_explore` MCP tool, or `codegraph explore` in the shell). Use its source and call paths to understand the implementation and impact before opening files directly.
+- After edits, let the index watcher synchronize (or run `codegraph sync`), then query changed symbols again to review the resulting source and callers. Use direct file reads only for details CodeGraph does not index, such as UI assets, configuration, and documentation.
+
+## Parallel agents
+
+- For substantial, multi-area tasks, proactively split independent research, implementation, and review into sub-agents. Use up to six agents in parallel when the work benefits from it; assign each a narrow scope and explicit file ownership to avoid overlapping edits. Keep tightly coupled integration in the coordinating agent and review all returned changes before merging them.
+- Do not create agents for trivial single-line changes where parallel work would add coordination cost.
+
 ## UI alignment
 
 - In summary cards, vertically center the entire multi-line text group against the icon and the card's full height, not just against the group's intrinsic content height.

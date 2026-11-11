@@ -11,7 +11,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const LEGACY_RUN_IMPORT_PATH: &str = "legacy-json-run-history:v1";
 pub const PAGE_SIZE: usize = 50;
 pub const RUN_HISTORY_LIMIT: usize = 50;
@@ -43,6 +43,7 @@ pub struct ArchiveRecord {
     pub country: String,
     pub is_vpn: bool,
     pub status: String,
+    pub failure_reason: Option<String>,
     pub ping_ms: Option<u64>,
     pub speed_kbs: Option<f64>,
 }
@@ -56,6 +57,7 @@ pub struct ArchiveObservation {
     pub run_summary: String,
     pub elapsed_seconds: u64,
     pub status: String,
+    pub failure_reason: Option<String>,
     pub country: String,
     pub ping_ms: Option<u64>,
     pub speed_kbs: Option<f64>,
@@ -134,6 +136,13 @@ struct ProbeResult {
     speed_kbs: Option<f64>,
 }
 
+#[derive(Deserialize)]
+struct SpeedFailureDiagnostic {
+    #[serde(default)]
+    fingerprint: String,
+    failure_reason: Option<String>,
+}
+
 #[derive(Clone)]
 struct Candidate {
     fingerprint: String,
@@ -145,6 +154,7 @@ struct Candidate {
     country: String,
     is_vpn: bool,
     status: String,
+    failure_reason: Option<String>,
     ping_ms: Option<u64>,
     speed_kbs: Option<f64>,
 }
@@ -513,7 +523,8 @@ impl ArchiveStore {
         let mut statement = connection.prepare(
             "SELECT runs.id, runs.checker_mode, runs.checked_at, runs.outcome,
                     runs.summary, runs.elapsed_seconds, observations.status,
-                    observations.country, observations.ping_ms, observations.speed_kbs
+                    observations.country, observations.ping_ms, observations.speed_kbs,
+                    observations.failure_reason
              FROM observations
              JOIN check_runs AS runs ON runs.id = observations.run_id
              WHERE observations.proxy_id = ?1
@@ -534,6 +545,7 @@ impl ArchiveStore {
                     country: observation.get(7)?,
                     ping_ms: ping.map(|value| value.max(0) as u64),
                     speed_kbs: observation.get(9)?,
+                    failure_reason: observation.get(10)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -547,7 +559,10 @@ impl ArchiveStore {
             .filter_map(|observation| observation.ping_ms)
             .collect::<Vec<_>>();
         let average_ping_ms = (!ping_values.is_empty()).then(|| {
-            (ping_values.iter().map(|value| u128::from(*value)).sum::<u128>()
+            (ping_values
+                .iter()
+                .map(|value| u128::from(*value))
+                .sum::<u128>()
                 / ping_values.len() as u128) as u64
         });
         let best_speed_kbs = observations
@@ -659,8 +674,8 @@ impl ArchiveStore {
         )?;
         let mut observation = transaction.prepare_cached(
             "INSERT INTO observations (
-                run_id, proxy_id, status, country, ping_ms, speed_kbs, observed_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                run_id, proxy_id, status, country, ping_ms, speed_kbs, failure_reason, observed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
 
         for record in unique_records {
@@ -692,6 +707,7 @@ impl ArchiveStore {
                 record.country,
                 ping_ms,
                 speed_kbs,
+                record.failure_reason,
                 checked_at,
             ])?;
         }
@@ -728,6 +744,19 @@ impl ArchiveStore {
             .filter_map(|line| parse::parse_link(line.trim()).ok())
             .map(|proxy| proxy.fingerprint())
             .collect::<HashSet<_>>();
+        let speed_failure_path = results_dir.join("speed-report.json");
+        let speed_failures = fs::read_to_string(&speed_failure_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Vec<SpeedFailureDiagnostic>>(&text).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|entry| {
+                let reason = entry
+                    .failure_reason
+                    .filter(|reason| !reason.trim().is_empty())?;
+                (!entry.fingerprint.is_empty()).then_some((entry.fingerprint, reason))
+            })
+            .collect::<HashMap<_, _>>();
 
         let mut candidates = HashMap::<String, Candidate>::new();
         for line in parsed
@@ -747,6 +776,18 @@ impl ArchiveStore {
             } else {
                 "Найден"
             };
+            let failure_reason = (status == "Не прошёл").then(|| {
+                speed_failures
+                    .get(&fingerprint)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        if summary.tcp_enabled {
+                            "TCP-проверка не смогла установить соединение с узлом.".to_owned()
+                        } else {
+                            "Узел не прошёл проверку доступности.".to_owned()
+                        }
+                    })
+            });
             // Read the generated country label from the raw fragment because
             // protocol parsers such as VMess may prefer the embedded name.
             let displayed_country = summary
@@ -785,6 +826,7 @@ impl ArchiveStore {
                     country,
                     is_vpn: is_vpn_protocol(proxy.proto),
                     status: status.to_string(),
+                    failure_reason,
                     ping_ms: probe.and_then(|row| row.ping_ms),
                     speed_kbs: probe
                         .and_then(|row| row.speed_kbs)
@@ -839,8 +881,8 @@ impl ArchiveStore {
         )?;
         let mut observation = transaction.prepare_cached(
             "INSERT INTO observations (
-                run_id, proxy_id, status, country, ping_ms, speed_kbs, observed_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                run_id, proxy_id, status, country, ping_ms, speed_kbs, failure_reason, observed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
 
         for candidate in candidates.values() {
@@ -872,6 +914,7 @@ impl ArchiveStore {
                     .ping_ms
                     .map(|value| value.min(i64::MAX as u64) as i64),
                 candidate.speed_kbs,
+                candidate.failure_reason,
                 checked_at,
             ])?;
         }
@@ -979,6 +1022,7 @@ fn create_schema(transaction: &Transaction<'_>) -> Result<()> {
             country TEXT NOT NULL DEFAULT '',
             ping_ms INTEGER,
             speed_kbs REAL,
+            failure_reason TEXT NOT NULL DEFAULT '',
             observed_at INTEGER NOT NULL,
             PRIMARY KEY (run_id, proxy_id)
          ) WITHOUT ROWID;
@@ -1093,6 +1137,12 @@ fn migrate_schema(transaction: &Transaction<'_>, from_version: i64) -> Result<()
              END;",
             )?;
         }
+    }
+    if from_version < 5 {
+        transaction.execute_batch(
+            "ALTER TABLE observations
+             ADD COLUMN failure_reason TEXT NOT NULL DEFAULT '';",
+        )?;
     }
     Ok(())
 }
@@ -1327,6 +1377,7 @@ mod tests {
                 country: "US".into(),
                 is_vpn: false,
                 status: "Доступен".into(),
+                failure_reason: None,
                 ping_ms: Some(25),
                 speed_kbs: None,
             },
@@ -1340,6 +1391,7 @@ mod tests {
                 country: "DE".into(),
                 is_vpn: true,
                 status: "Найден".into(),
+                failure_reason: None,
                 ping_ms: None,
                 speed_kbs: None,
             },
@@ -1375,6 +1427,7 @@ mod tests {
                 country: String::new(),
                 is_vpn: false,
                 status: "Найден".into(),
+                failure_reason: None,
                 ping_ms: None,
                 speed_kbs: None,
             },
@@ -1388,6 +1441,7 @@ mod tests {
                 country: String::new(),
                 is_vpn: true,
                 status: "Найден".into(),
+                failure_reason: None,
                 ping_ms: None,
                 speed_kbs: None,
             },
@@ -1417,6 +1471,7 @@ mod tests {
             country: String::new(),
             is_vpn: false,
             status: "Найден".into(),
+            failure_reason: None,
             ping_ms: None,
             speed_kbs: None,
         };

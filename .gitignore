@@ -4,6 +4,7 @@
 /.proxy_runtime/
 /proxy-sift-data/
 /.codex/
+/.codegraph/
 /raw.txt
 /parsed.txt
 *.tmp

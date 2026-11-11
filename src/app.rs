@@ -248,9 +248,33 @@ fn app_data_dir() -> anyhow::Result<PathBuf> {
 }
 
 fn settings_from_window(window: &AppWindow) -> settings::AppSettings {
+    let checker_mode = window.get_checker_mode().to_string();
+    let active_subscriptions = window.get_subscriptions().to_string();
+    let active_proxy_links = window.get_proxy_links().to_string();
+    let (vpn_subscriptions, forward_subscriptions) = if checker_mode == "forward" {
+        (
+            window.get_vpn_subscriptions().to_string(),
+            active_subscriptions,
+        )
+    } else {
+        (
+            active_subscriptions,
+            window.get_forward_subscriptions().to_string(),
+        )
+    };
+    let (vpn_proxy_links, forward_proxy_links) = if checker_mode == "forward" {
+        (window.get_vpn_proxy_links().to_string(), active_proxy_links)
+    } else {
+        (
+            active_proxy_links,
+            window.get_forward_proxy_links().to_string(),
+        )
+    };
     settings::AppSettings {
-        subscriptions: window.get_subscriptions().to_string(),
-        proxy_links: window.get_proxy_links().to_string(),
+        subscriptions: vpn_subscriptions,
+        proxy_links: vpn_proxy_links,
+        forward_subscriptions: Some(forward_subscriptions),
+        forward_proxy_links: Some(forward_proxy_links),
         use_default_sources: window.get_use_default_sources(),
         source_set: window.get_source_set().to_string(),
         worker_count_value: window.get_worker_count_value().to_string(),
@@ -260,7 +284,7 @@ fn settings_from_window(window: &AppWindow) -> settings::AppSettings {
         use_speed: window.get_use_speed(),
         use_geoip: window.get_use_geoip(),
         output_directory: window.get_output_directory().to_string(),
-        checker_mode: window.get_checker_mode().to_string(),
+        checker_mode,
     }
 }
 
@@ -379,6 +403,7 @@ fn configure_cli(
     cli.good_output = output.join("good.txt").display().to_string();
     cli.dead = Some(output.join("dead.txt").display().to_string());
     cli.json_output = Some(output.join("proxy-results.json").display().to_string());
+    cli.speed_report = use_speed.then(|| output.join("speed-report.json").display().to_string());
     cli.validate().map_err(anyhow::Error::msg)?;
     Ok(cli)
 }
@@ -596,6 +621,17 @@ fn load_database_detail(window: &AppWindow, archive: &ArchiveStore, id: i64, vpn
                     .filter(|value| *value > 0.0)
                     .map(format_speed)
                     .unwrap_or_else(|| "—".into())
+                    .into(),
+                failure_reason: observation
+                    .failure_reason
+                    .as_deref()
+                    .filter(|reason| !reason.trim().is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        (observation.status == "Не прошёл")
+                            .then(|| "Причина не сохранялась для этой проверки.".to_owned())
+                    })
+                    .unwrap_or_default()
                     .into(),
                 summary: format!(
                     "{} · {} · {} сек.",
@@ -862,6 +898,7 @@ fn start_archive_recheck(
                             country: result.country.clone(),
                             is_vpn: false,
                             status: forward_status_label(&probe.status, probe.alive).to_owned(),
+                            failure_reason: forward_failure_reason(&probe.status, probe.alive),
                             ping_ms: probe.ping_ms,
                             speed_kbs: None,
                         }
@@ -2085,6 +2122,16 @@ fn normalize_subscription_inputs(window: &AppWindow) -> bool {
     changed
 }
 
+fn remember_active_source_inputs(window: &AppWindow) {
+    if window.get_checker_mode() == "forward" {
+        window.set_forward_subscriptions(window.get_subscriptions());
+        window.set_forward_proxy_links(window.get_proxy_links());
+    } else {
+        window.set_vpn_subscriptions(window.get_subscriptions());
+        window.set_vpn_proxy_links(window.get_proxy_links());
+    }
+}
+
 fn subscription_preview(window: &AppWindow) {
     let subscriptions = window.get_subscriptions().to_string();
     let links = window.get_proxy_links().to_string();
@@ -2095,9 +2142,17 @@ fn subscription_preview(window: &AppWindow) {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>();
     let summary = if !urls.is_empty() {
-        format!("Добавлено {} URL", urls.len())
+        if window.get_checker_mode() == "forward" {
+            format!("{} URL-{}", urls.len(), url_source_noun(urls.len()))
+        } else {
+            format!("Добавлено {} URL", urls.len())
+        }
     } else {
-        "Подписок не добавлено".to_string()
+        if window.get_checker_mode() == "forward" {
+            "URL-источники не добавлены".to_string()
+        } else {
+            "VPN-подписки не добавлены".to_string()
+        }
     };
     let entries = urls
         .iter()
@@ -2107,6 +2162,14 @@ fn subscription_preview(window: &AppWindow) {
     window.set_subscription_summary(summary.into());
     window.set_subscription_lines(ModelRc::from(lines.as_slice()));
     window.set_subscription_entries(ModelRc::from(entries.as_slice()));
+}
+
+fn url_source_noun(count: usize) -> &'static str {
+    match count % 10 {
+        1 if count % 100 != 11 => "источник",
+        2..=4 if !(12..=14).contains(&(count % 100)) => "источника",
+        _ => "источников",
+    }
 }
 
 fn source_count_label(count: usize) -> String {
@@ -2396,6 +2459,25 @@ fn forward_status_label(status: &str, alive: bool) -> &'static str {
     }
 }
 
+fn forward_failure_reason(status: &str, alive: bool) -> Option<String> {
+    if alive {
+        return None;
+    }
+    let reason = match status {
+        "timeout" => "Истёк таймаут ответа прокси.",
+        "auth_required" => "Прокси требует логин и пароль.",
+        "auth_failed" => "Прокси отклонил учётные данные.",
+        "unsupported_auth" => "Способ авторизации прокси не поддерживается.",
+        "invalid_credentials" => "Прокси отклонил идентификатор SOCKS4.",
+        "connection_failed" => "Не удалось установить соединение с прокси.",
+        "target_resolution_failed" => "Не удалось разрешить адрес тестового сайта.",
+        "proxy_rejected" => "Прокси отклонил запрос к тестовому сайту.",
+        "protocol_unknown" => "Не удалось определить тип прокси.",
+        _ => "Проверка прокси завершилась ошибкой.",
+    };
+    Some(reason.to_owned())
+}
+
 pub fn launch_gui() -> anyhow::Result<()> {
     let data = app_data_dir()?;
     let (preferences, preferences_error) = match settings::load(&data) {
@@ -2424,11 +2506,58 @@ pub fn launch_gui() -> anyhow::Result<()> {
         Err(error) => (None, Some(error.to_string())),
     };
     let window = AppWindow::new()?;
+    if let Err(error) = crate::proxy_finder::wire(&window, &data) {
+        let errors = [SharedString::from(format!(
+            "Не удалось подготовить страницу поиска прокси: {error}"
+        ))];
+        window.set_proxy_search_errors(ModelRc::from(errors.as_slice()));
+        window.set_proxy_search_status("Хранилище поиска недоступно".into());
+    }
     window
         .global::<Palette>()
         .set_color_scheme(slint::private_unstable_api::re_exports::ColorScheme::Light);
-    window.set_subscriptions(preferences.subscriptions.clone().into());
-    window.set_proxy_links(preferences.proxy_links.clone().into());
+    let initial_checker_mode = if matches!(preferences.checker_mode.as_str(), "vpn" | "forward") {
+        preferences.checker_mode.as_str()
+    } else {
+        "vpn"
+    };
+    let forward_subscriptions = preferences
+        .forward_subscriptions
+        .clone()
+        .unwrap_or_else(|| {
+            if initial_checker_mode == "forward" {
+                preferences.subscriptions.clone()
+            } else {
+                String::new()
+            }
+        });
+    let forward_proxy_links = preferences.forward_proxy_links.clone().unwrap_or_else(|| {
+        if initial_checker_mode == "forward" {
+            preferences.proxy_links.clone()
+        } else {
+            String::new()
+        }
+    });
+    window.set_vpn_subscriptions(preferences.subscriptions.clone().into());
+    window.set_forward_subscriptions(forward_subscriptions.clone().into());
+    window.set_vpn_proxy_links(preferences.proxy_links.clone().into());
+    window.set_forward_proxy_links(forward_proxy_links.clone().into());
+    window.set_subscriptions(
+        if initial_checker_mode == "forward" {
+            forward_subscriptions
+        } else {
+            preferences.subscriptions.clone()
+        }
+        .into(),
+    );
+    window.set_proxy_links(
+        if initial_checker_mode == "forward" {
+            forward_proxy_links
+        } else {
+            preferences.proxy_links.clone()
+        }
+        .into(),
+    );
     window.set_use_default_sources(preferences.use_default_sources);
     window.set_source_set(initial_source_set.clone().into());
     window.set_worker_count_value(preferences.worker_count_value.clone().into());
@@ -2437,16 +2566,10 @@ pub fn launch_gui() -> anyhow::Result<()> {
     window.set_threshold_unit(preferences.threshold_unit.clone().into());
     window.set_use_speed(preferences.use_speed);
     window.set_use_geoip(preferences.use_geoip);
-    window.set_checker_mode(
-        if matches!(preferences.checker_mode.as_str(), "vpn" | "forward") {
-            preferences.checker_mode.clone().into()
-        } else {
-            "vpn".into()
-        },
-    );
+    window.set_checker_mode(initial_checker_mode.into());
     if preferences.checker_mode == "forward" {
         window.set_status_detail(
-            "Вставьте HTTP/SOCKS прокси или добавьте подходящую подписку.".into(),
+            "Добавьте URL-источники HTTP/SOCKS или вставьте прокси для проверки.".into(),
         );
     }
     window.set_output_directory(output.display().to_string().into());
@@ -2490,6 +2613,7 @@ pub fn launch_gui() -> anyhow::Result<()> {
     window.set_run_history(ModelRc::from(initial_history.as_slice()));
     set_runtime_status(&window, &data);
     let normalized_subscriptions = normalize_subscription_inputs(&window);
+    remember_active_source_inputs(&window);
     subscription_preview(&window);
     if normalized_subscriptions && settings_writable {
         persist_window_settings(&window, &data);
@@ -2703,6 +2827,7 @@ pub fn launch_gui() -> anyhow::Result<()> {
     window.on_subscriptions_changed(move || {
         if let Some(window) = subscriptions_window.upgrade() {
             normalize_subscription_inputs(&window);
+            remember_active_source_inputs(&window);
             subscription_preview(&window);
             if settings_writable {
                 persist_window_settings(&window, &subscriptions_data);
@@ -2749,6 +2874,8 @@ pub fn launch_gui() -> anyhow::Result<()> {
     let all_rows = Arc::new(Mutex::new(Vec::<ProxyRow>::new()));
     let mode_window = window.as_weak();
     let mode_rows = all_rows.clone();
+    let mode_data = data.clone();
+    let mode_settings_writable = settings_writable;
     window.on_select_checker_mode(move |mode| {
         if let Some(window) = mode_window.upgrade() {
             let mode = if mode.as_str() == "forward" {
@@ -2756,7 +2883,28 @@ pub fn launch_gui() -> anyhow::Result<()> {
             } else {
                 "vpn"
             };
+            let previous_mode = window.get_checker_mode().to_string();
+            if previous_mode == "forward" {
+                window.set_forward_subscriptions(window.get_subscriptions());
+                window.set_forward_proxy_links(window.get_proxy_links());
+            } else {
+                window.set_vpn_subscriptions(window.get_subscriptions());
+                window.set_vpn_proxy_links(window.get_proxy_links());
+            }
             window.set_checker_mode(mode.into());
+            if mode == "forward" {
+                window.set_subscriptions(window.get_forward_subscriptions());
+                window.set_proxy_links(window.get_forward_proxy_links());
+            } else {
+                window.set_subscriptions(window.get_vpn_subscriptions());
+                window.set_proxy_links(window.get_vpn_proxy_links());
+            }
+            normalize_subscription_inputs(&window);
+            remember_active_source_inputs(&window);
+            subscription_preview(&window);
+            if mode_settings_writable {
+                persist_window_settings(&window, &mode_data);
+            }
             window.set_result_filter("Все".into());
             window.set_search_query(SharedString::default());
             window.set_count_fetched("0".into());
@@ -2768,7 +2916,7 @@ pub fn launch_gui() -> anyhow::Result<()> {
             window.set_proxy_rows(ModelRc::from([].as_slice()));
             window.set_status("Готов к запуску".into());
             window.set_status_detail(if mode == "forward" {
-                "Вставьте HTTP/SOCKS прокси или добавьте подходящую подписку.".into()
+                "Добавьте URL-источники HTTP/SOCKS или вставьте прокси для проверки.".into()
             } else {
                 "Настройки корректны. Можно начать проверку.".into()
             });
@@ -3347,6 +3495,7 @@ pub fn launch_gui() -> anyhow::Result<()> {
                                         country: result.country.clone(),
                                         is_vpn: false,
                                         status: forward_status_label(&probe.status, probe.alive).to_owned(),
+                                        failure_reason: forward_failure_reason(&probe.status, probe.alive),
                                         ping_ms: probe.ping_ms,
                                         speed_kbs: None,
                                     }

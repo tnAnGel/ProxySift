@@ -375,13 +375,13 @@ pub async fn probe(proxy: &ForwardProxy, timeout: Duration) -> ProbeResult {
 }
 
 async fn probe_auto(proxy: &ForwardProxy, timeout: Duration) -> ProbeResult {
-    // Keep this order predictable: common HTTP proxy variants first, followed
-    // by SOCKS4 (local and remote DNS) and SOCKS5.
-    const CANDIDATES: [ForwardProxyProtocol; 5] = [
+    // Each candidate gets its own full timeout. Keep auto-detection in the
+    // user-facing order: HTTP, HTTPS, SOCKS4, then SOCKS5. SOCKS4a remains
+    // available when explicitly selected, but is not a separate auto attempt.
+    const CANDIDATES: [ForwardProxyProtocol; 4] = [
         ForwardProxyProtocol::Http,
         ForwardProxyProtocol::Https,
         ForwardProxyProtocol::Socks4,
-        ForwardProxyProtocol::Socks4a,
         ForwardProxyProtocol::Socks5,
     ];
     let mut saw_timeout = false;

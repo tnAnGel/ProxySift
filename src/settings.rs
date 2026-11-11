@@ -15,6 +15,13 @@ static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 pub struct AppSettings {
     pub subscriptions: String,
     pub proxy_links: String,
+    /// HTTP/SOCKS subscription feeds. `None` identifies settings written by
+    /// older versions where source URLs were shared between checker modes.
+    #[serde(default)]
+    pub forward_subscriptions: Option<String>,
+    /// Manually pasted HTTP/SOCKS proxies, with the same legacy migration rule.
+    #[serde(default)]
+    pub forward_proxy_links: Option<String>,
     pub use_default_sources: bool,
     pub source_set: String,
     pub worker_count_value: String,
@@ -32,6 +39,8 @@ impl Default for AppSettings {
         Self {
             subscriptions: String::new(),
             proxy_links: String::new(),
+            forward_subscriptions: None,
+            forward_proxy_links: None,
             use_default_sources: true,
             source_set: "3".into(),
             worker_count_value: "32".into(),

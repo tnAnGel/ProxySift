@@ -1,5 +1,6 @@
 import { LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 import { ArchiveObservationRow, ArchiveScreen, DatabaseRow, HistoryScreen, OverviewScreen, ProfilesScreen, RunHistoryRow, RuntimeScreen, SourcesScreen } from "screens.slint";
+import { ProxyFinderProvider, ProxyFinderScreen, ProxySavedSource, ProxySearchEngine, ProxySearchQuery, ProxySearchResult } from "proxy-finder.slint";
 import { StatusPulse } from "status-pulse.slint";
 export { Palette } from "std-widgets.slint";
 
@@ -29,6 +30,7 @@ component NavItem inherits Rectangle {
         spacing: 12px;
         if root.kind == "overview": Image { source: @image-url("icons/nav-overview.svg"); width: 18px; height: 18px; colorize: root.selected ? #155da2 : #5d6b7e; }
         if root.kind == "check": Image { source: @image-url("icons/nav-check.svg"); width: 18px; height: 18px; colorize: root.selected ? #155da2 : #5d6b7e; }
+        if root.kind == "finder": Image { source: @image-url("icons/search.svg"); width: 18px; height: 18px; colorize: root.selected ? #155da2 : #5d6b7e; }
         if root.kind == "sources": Image { source: @image-url("icons/nav-sources.svg"); width: 18px; height: 18px; colorize: root.selected ? #155da2 : #5d6b7e; }
         if root.kind == "history": Image { source: @image-url("icons/nav-history.svg"); width: 18px; height: 18px; colorize: root.selected ? #155da2 : #5d6b7e; }
         if root.kind == "db-proxy": Image { source: @image-url("icons/nav-db-proxy.svg"); width: 18px; height: 18px; colorize: root.selected ? #155da2 : #5d6b7e; }
@@ -411,7 +413,7 @@ component SwitchToggle inherits Rectangle {
                 background: #ffffff;
             }
         }
-        Text { text: root.label; color: #344257; font-size: 12px; height: 20px; vertical-alignment: center; }
+        Text { text: root.label; color: #344257; font-size: 12px; height: 28px; vertical-alignment: center; }
         Rectangle { }
     }
     toggle-area := TouchArea { clicked => { root.checked = !root.checked; } }
@@ -768,6 +770,10 @@ export component AppWindow inherits Window {
 
     in-out property <string> subscriptions: "";
     in-out property <string> proxy-links: "";
+    in-out property <string> vpn-subscriptions: "";
+    in-out property <string> forward-subscriptions: "";
+    in-out property <string> vpn-proxy-links: "";
+    in-out property <string> forward-proxy-links: "";
     in-out property <string> draft-subscriptions: "";
     in-out property <string> draft-proxy-links: "";
     in-out property <string> subscription-summary: "Подписки не добавлены";
@@ -820,6 +826,20 @@ export component AppWindow inherits Window {
     in-out property <bool> show-shortcuts: false;
     in-out property <string> header-panel: "";
     in-out property <string> active-page: "check";
+    in-out property <[ProxySearchQuery]> proxy-search-queries: [];
+    in-out property <[ProxySearchEngine]> proxy-search-engines: [];
+    in-out property <[ProxyFinderProvider]> proxy-search-providers: [];
+    in-out property <[ProxySearchResult]> proxy-search-results: [];
+    in-out property <[ProxySavedSource]> proxy-saved-sources: [];
+    in-out property <[string]> proxy-search-errors: [];
+    in-out property <string> proxy-search-status: "Поиск готов к запуску";
+    in-out property <bool> proxy-searching: false;
+    in-out property <bool> proxy-collecting: false;
+    in-out property <bool> proxy-sending-to-check: false;
+    in-out property <int> proxy-progress-done: 0;
+    in-out property <int> proxy-progress-total: 0;
+    in-out property <string> proxy-progress-rate: "—";
+    in-out property <string> proxy-collected-node-count: "0";
     in-out property <[RunHistoryRow]> run-history: [];
     in-out property <[DatabaseRow]> database-rows: [];
     in-out property <string> database-total: "0";
@@ -886,6 +906,22 @@ export component AppWindow inherits Window {
     callback database-page-changed(bool, int);
     callback database-row-selected(bool, string);
     callback database-row-recheck(bool, string);
+    callback proxy-finder-query-edited(string, string);
+    callback proxy-finder-query-enabled-changed(string, bool);
+    callback proxy-finder-query-added;
+    callback proxy-finder-query-removed(string);
+    callback proxy-finder-search;
+    callback proxy-finder-engine-toggled(string, bool);
+    callback proxy-finder-engines-select-all(bool);
+    callback proxy-finder-provider-action(string);
+    callback proxy-finder-save-result-source(string, string);
+    callback proxy-finder-provider-credential-save(string, string);
+    callback proxy-finder-source-selection-changed(string, bool);
+    callback proxy-finder-source-removed(string);
+    callback proxy-finder-collect-selected;
+    callback proxy-finder-collect-all;
+    callback proxy-finder-send-collected-to-check;
+    callback proxy-finder-clear-errors;
     changed worker-count-value => root.preferences-changed();
     changed timeout-value => root.preferences-changed();
     changed threshold-value => root.preferences-changed();
@@ -900,6 +936,7 @@ export component AppWindow inherits Window {
     property <string> breadcrumb: root.active-page == "check" ? "Проверка  /  Новый запуск"
         : root.active-page == "overview" ? "Обзор"
         : root.active-page == "sources" ? "Источники"
+        : root.active-page == "proxy-finder" ? "Поиск списков"
         : root.active-page == "history" ? "История запусков"
         : root.active-page == "db-proxy" ? "База данных прокси"
         : root.active-page == "db-vpn" ? "База данных VPN"
@@ -1183,6 +1220,7 @@ export component AppWindow inherits Window {
                     Rectangle { height: 10px; }
                     overview-nav-item := NavItem { label: "Обзор"; kind: "overview"; selected: root.active-page == "overview"; clicked => { root.active-page = "overview"; } }
                     check-nav-item := NavItem { label: "Проверка"; kind: "check"; selected: root.active-page == "check"; clicked => { root.active-page = "check"; } }
+                    proxy-finder-nav-item := NavItem { label: "Поиск списков"; kind: "finder"; selected: root.active-page == "proxy-finder"; clicked => { root.active-page = "proxy-finder"; } }
                     sources-nav-item := NavItem { label: "Источники"; kind: "sources"; selected: root.active-page == "sources"; clicked => { root.active-page = "sources"; } }
                     history-nav-item := NavItem { label: "История запусков"; kind: "history"; selected: root.active-page == "history"; clicked => { root.active-page = "history"; } }
                     Rectangle { height: 1px; background: #e1e6ed; }
@@ -1221,7 +1259,6 @@ export component AppWindow inherits Window {
                                 mode: root.checker-mode;
                                 locked: root.checking;
                                 selected(mode) => {
-                                    root.checker-mode = mode;
                                     root.select-checker-mode(mode);
                                 }
                             }
@@ -1322,8 +1359,8 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         padding-top: 10px;
                                         spacing: 5px;
-                                        Text { text: "Встроенные наборы содержат VPN-узлы."; color: #405066; font-size: 12px; font-weight: 600; height: 18px; vertical-alignment: center; }
-                                        Text { text: "Для HTTP / SOCKS добавьте URL подходящей подписки или вставьте прокси-ссылки."; color: #7a8798; font-size: 11px; height: 42px; wrap: word-wrap; }
+                                        Text { text: "Источники прокси задаются отдельно от VPN."; color: #405066; font-size: 12px; font-weight: 600; height: 18px; vertical-alignment: center; }
+                                        Text { text: "Укажите URL списка: ProxySift загрузит узлы, проверит их и добавит результаты в общую базу прокси."; color: #7a8798; font-size: 11px; height: 42px; wrap: word-wrap; }
                                     }
                                 }
                             }
@@ -1339,7 +1376,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout { width: 18px; height: 20px; alignment: center;
                                         Image { source: @image-url("icons/nav-link.svg"); width: 18px; height: 18px; }
                                     }
-                                    Text { text: "Подписки"; color: #243247; font-size: 13px; font-weight: 600; height: 20px; vertical-alignment: center; }
+                                    Text { text: root.checker-mode == "forward" ? "Источники прокси" : "VPN-подписки"; color: #243247; font-size: 13px; font-weight: 600; height: 20px; vertical-alignment: center; }
                                     Rectangle { }
                                 }
                                 Rectangle { height: 15px; }
@@ -1355,7 +1392,7 @@ export component AppWindow inherits Window {
                                         VerticalLayout { padding-left: 10px; padding-right: 10px; padding-top: 8px; padding-bottom: 6px; spacing: 2px;
                                             Text { text: root.subscription-summary; color: #273548; font-size: 12px; height: 16px; vertical-alignment: center; }
                                             for line in root.subscription-lines: Text { text: line; color: #7a8798; font-size: 11px; height: 14px; vertical-alignment: center; overflow: elide; }
-                                            if root.subscription-lines.length == 0: Text { text: "Добавьте URL подписки или прокси-ссылки"; color: #7a8798; font-size: 11px; height: 14px; vertical-alignment: center; overflow: elide; }
+                                            if root.subscription-lines.length == 0: Text { text: root.checker-mode == "forward" ? "Добавьте URL списка HTTP/SOCKS" : "Добавьте URL VPN-подписки"; color: #7a8798; font-size: 11px; height: 14px; vertical-alignment: center; overflow: elide; }
                                         }
                                     }
                                     Rectangle { height: 8px; }
@@ -1660,6 +1697,38 @@ export component AppWindow inherits Window {
                 toggle-sources => { root.use-default-sources = !root.use-default-sources; }
                 start-check => { root.active-page = "check"; root.start-check(); }
             }
+            if root.active-page == "proxy-finder": ProxyFinderScreen {
+                queries: root.proxy-search-queries;
+                engines: root.proxy-search-engines;
+                providers: root.proxy-search-providers;
+                search-results: root.proxy-search-results;
+                saved-sources: root.proxy-saved-sources;
+                errors: root.proxy-search-errors;
+                search-status: root.proxy-search-status;
+                searching: root.proxy-searching;
+                collecting: root.proxy-collecting;
+                sending-to-check: root.proxy-sending-to-check;
+                progress-done: root.proxy-progress-done;
+                progress-total: root.proxy-progress-total;
+                progress-rate: root.proxy-progress-rate;
+                collected-node-count: root.proxy-collected-node-count;
+                query-edited(id, query) => root.proxy-finder-query-edited(id, query);
+                query-enabled-changed(id, enabled) => root.proxy-finder-query-enabled-changed(id, enabled);
+                query-added => root.proxy-finder-query-added();
+                query-removed(id) => root.proxy-finder-query-removed(id);
+                search => root.proxy-finder-search();
+                engine-toggled(id, selected) => root.proxy-finder-engine-toggled(id, selected);
+                engines-select-all(selected) => root.proxy-finder-engines-select-all(selected);
+                provider-action(id) => root.proxy-finder-provider-action(id);
+                save-result-source(url, classification) => root.proxy-finder-save-result-source(url, classification);
+                provider-credential-save(provider, secret) => root.proxy-finder-provider-credential-save(provider, secret);
+                source-selection-changed(id, selected) => root.proxy-finder-source-selection-changed(id, selected);
+                source-removed(id) => root.proxy-finder-source-removed(id);
+                collect-selected => root.proxy-finder-collect-selected();
+                collect-all => root.proxy-finder-collect-all();
+                send-collected-to-check => root.proxy-finder-send-collected-to-check();
+                clear-errors => root.proxy-finder-clear-errors();
+            }
             if root.active-page == "history": HistoryScreen {
                 run-history: root.run-history;
                 start-check => { root.active-page = "check"; root.start-check(); }
@@ -1902,7 +1971,7 @@ export component AppWindow inherits Window {
                     height: 28px;
                     spacing: 10px;
                     Image { source: @image-url("icons/nav-link.svg"); width: 20px; height: 20px; }
-                    Text { text: "Редактирование подписок"; color: #172336; font-size: 18px; font-weight: 700; height: 28px; vertical-alignment: center; }
+                    Text { text: root.checker-mode == "forward" ? "Источники HTTP/SOCKS" : "VPN-подписки"; color: #172336; font-size: 18px; font-weight: 700; height: 28px; vertical-alignment: center; }
                     Rectangle { }
                     Rectangle {
                         width: 28px;
@@ -1916,12 +1985,12 @@ export component AppWindow inherits Window {
                 Rectangle { height: 8px; }
                 Text {
                     text: root.checker-mode == "forward"
-                        ? "URL списков — сверху; ссылки на списки в нижнем поле распознаются автоматически."
-                        : "Одна ссылка на строку: подписки сверху, VPN-прокси снизу.";
-                    color: #718096; font-size: 11px; height: 20px; vertical-alignment: center;
+                        ? "URL-списки загружаются при запуске; найденные прокси проверяются и сохраняются в общей базе."
+                        : "Добавьте URL VPN-подписок или вставьте готовые VPN-ссылки ниже.";
+                    color: #718096; font-size: 11px; height: 32px; wrap: word-wrap; vertical-alignment: center;
                 }
-                Rectangle { height: 20px; }
-                Text { text: "URL подписок"; color: #344257; font-size: 12px; font-weight: 600; height: 17px; vertical-alignment: center; }
+                Rectangle { height: 8px; }
+                Text { text: root.checker-mode == "forward" ? "URL-источники прокси" : "URL VPN-подписок"; color: #344257; font-size: 12px; font-weight: 600; height: 17px; vertical-alignment: center; }
                 Rectangle { height: 6px; }
                 subscriptions-text-edit := TextEdit {
                     height: 78px;
@@ -1941,7 +2010,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 Rectangle { height: 16px; }
-                Text { text: "Прокси-ссылки"; color: #344257; font-size: 12px; font-weight: 600; height: 17px; vertical-alignment: center; }
+                Text { text: root.checker-mode == "forward" ? "Прокси для ручной проверки" : "VPN-ссылки для ручной проверки"; color: #344257; font-size: 12px; font-weight: 600; height: 17px; vertical-alignment: center; }
                 Rectangle { height: 6px; }
                 proxy-links-text-edit := TextEdit {
                     height: 78px;
